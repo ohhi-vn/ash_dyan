@@ -26,7 +26,7 @@ request map / AshDyan.Request
    Request.normalize   ── fill defaults, coerce string keys
         │
         ▼
-   Request.validate    ── check against the `dynal` whitelist
+   Request.validate    ── check against the `dyan` whitelist
         │                        (field/function/bucket/percentile/group_by/filter/limit)
         ▼
    Engine.build_query ── resolve primary read action
@@ -46,7 +46,7 @@ request map / AshDyan.Request
 
 ## The security model: a compile-time whitelist
 
-The `dynal` DSL section is a **whitelist**. A runtime request can only
+The `dyan` DSL section is a **whitelist**. A runtime request can only
 reference fields, functions, buckets, and filter targets declared there. This is
 what makes dynamic requests safe:
 
@@ -103,12 +103,12 @@ cannot serve the requested type).
 | Module                          | Responsibility                                              |
 | ------------------------------- | ----------------------------------------------------------- |
 | `AshDyan`                     | Public API (`run/2`, `run!/2`, `supports?/2`), logging.     |
-| `AshDyan.Request`             | Normalize + validate a request against the `dynal` whitelist.  |
+| `AshDyan.Request`             | Normalize + validate a request against the `dyan` whitelist.  |
 | `AshDyan.Engine`             | Build the `Ash.Query`, run it, enforce timeout/limits.         |
 | `AshDyan.Engine.Formatter`   | In-memory aggregation into `labels` / `series`.                |
 | `AshDyan.Engine.TimeBucket`  | In-memory bucket labels; `date_trunc` reference for pushdown. |
 | `AshDyan.Result`             | The chart-ready output struct.                               |
-| `AshDyan.Info`               | Read back the persisted `dynal` config for a resource.         |
+| `AshDyan.Info`               | Read back the persisted `dyan` config for a resource.         |
 | `AshDyan.Error`              | Structured error with `field` / `reason`.                    |
 | `AshDyan.DataLayer.*`        | Per-data-layer capability behaviour.                         |
 | `AshDyan.Dsl.*`             | DSL entity, transformer (persist config), verifiers.         |

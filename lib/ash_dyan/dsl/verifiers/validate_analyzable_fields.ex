@@ -1,6 +1,6 @@
 defmodule AshDyan.Dsl.Verifiers.ValidateAnalyzableFields do
   @moduledoc """
-  Validates the `dynal` DSL configuration after compilation.
+  Validates the `dyan` DSL configuration after compilation.
 
   - Rejects `analyzable_field` referencing a non-existent attribute.
   - Rejects `:aggregate` declarations with no `functions`.
@@ -18,7 +18,7 @@ defmodule AshDyan.Dsl.Verifiers.ValidateAnalyzableFields do
 
     errors =
       dsl_state
-      |> Spark.Dsl.Verifier.get_entities([:dynal])
+      |> Spark.Dsl.Verifier.get_entities([:dyan])
       |> Enum.flat_map(fn field -> validate_field(resource, field) end)
 
     case errors do
@@ -31,24 +31,24 @@ defmodule AshDyan.Dsl.Verifiers.ValidateAnalyzableFields do
     if attribute_exists?(resource, name) do
       []
     else
-      ["dynal: analyzable_field :#{name} (frequency) references a non-existent attribute"]
+      ["dyan: analyzable_field :#{name} (frequency) references a non-existent attribute"]
     end
   end
 
   defp validate_field(_resource, %AnalyzableField{type: :aggregate, name: name, functions: []}) do
-    ["dynal: analyzable_field :#{name} (aggregate) must declare at least one function"]
+    ["dyan: analyzable_field :#{name} (aggregate) must declare at least one function"]
   end
 
   defp validate_field(resource, %AnalyzableField{type: :aggregate, name: name} = _field) do
     if attribute_exists?(resource, name) do
       []
     else
-      ["dynal: analyzable_field :#{name} (aggregate) references a non-existent attribute"]
+      ["dyan: analyzable_field :#{name} (aggregate) references a non-existent attribute"]
     end
   end
 
   defp validate_field(_resource, %AnalyzableField{type: :time_bucket, name: name, buckets: []}) do
-    ["dynal: analyzable_field :#{name} (time_bucket) must declare at least one bucket"]
+    ["dyan: analyzable_field :#{name} (time_bucket) must declare at least one bucket"]
   end
 
   defp validate_field(resource, %AnalyzableField{
@@ -59,19 +59,27 @@ defmodule AshDyan.Dsl.Verifiers.ValidateAnalyzableFields do
     if attribute_exists?(resource, time_field || name) do
       []
     else
-      ["dynal: analyzable_field :#{name} (time_bucket) references a non-existent time attribute"]
+      ["dyan: analyzable_field :#{name} (time_bucket) references a non-existent time attribute"]
     end
   end
 
   defp validate_field(_resource, %AnalyzableField{type: :percentile, name: name, percentiles: []}) do
-    ["dynal: analyzable_field :#{name} (percentile) must declare at least one percentile"]
+    ["dyan: analyzable_field :#{name} (percentile) must declare at least one percentile"]
   end
 
   defp validate_field(resource, %AnalyzableField{type: :percentile, name: name} = _field) do
     if attribute_exists?(resource, name) do
       []
     else
-      ["dynal: analyzable_field :#{name} (percentile) references a non-existent attribute"]
+      ["dyan: analyzable_field :#{name} (percentile) references a non-existent attribute"]
+    end
+  end
+
+  defp validate_field(resource, %AnalyzableField{type: :histogram, name: name} = _field) do
+    if attribute_exists?(resource, name) do
+      []
+    else
+      ["dyan: analyzable_field :#{name} (histogram) references a non-existent attribute"]
     end
   end
 

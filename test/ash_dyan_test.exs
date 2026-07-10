@@ -19,7 +19,7 @@ defmodule AshDyanTest do
   describe "DSL / Info" do
     test "resource declares analyzable fields" do
       fields = AshDyan.Info.analyzable_fields(Order)
-      assert length(fields) == 4
+      assert length(fields) == 5
       assert AshDyan.Info.analyzable?(Order)
       assert AshDyan.Info.max_group_by(Order) == 3
       assert AshDyan.Info.allow_filters_on(Order) == [:status, :region, :inserted_at]
@@ -123,7 +123,7 @@ defmodule AshDyanTest do
                AshDyan.run(%{resource: NotAModule, type: :frequency, column: :status})
     end
 
-    test "rejects a resource without a dynal section" do
+    test "rejects a resource without a dyan section" do
       assert {:error, %AshDyan.Error{field: :resource, reason: :not_analyzable}} =
                AshDyan.run(%{resource: Plain, type: :frequency, column: :status})
     end
@@ -666,6 +666,129 @@ defmodule AshDyanTest do
 
       # Correctness proxy: every series aligns to the shared label axis.
       assert Enum.all?(result.series, fn s -> length(s.data) == length(result.labels) end)
+    end
+  end
+
+  describe "extended aggregate functions" do
+    test "count and count_distinct" do
+      records = read(Order, Ash.Query.for_read(Order, :read, %{}, domain: Shop))
+
+      {:ok, count} =
+        AshDyan.Engine.Formatter.format(
+          %AshDyan.Request{type: :aggregate, column: :total_amount, function: :count},
+          records
+        )
+
+      {:ok, distinct} =
+        AshDyan.Engine.Formatter.format(
+          %AshDyan.Request{type: :aggregate, column: :region, function: :count_distinct},
+          records
+        )
+
+      assert hd(count.series).data == [6]
+      # 3 distinct regions: EU, US, APAC
+      assert hd(distinct.series).data == [3]
+    end
+
+    test "stddev, variance, and median" do
+      records = read(Order, Ash.Query.for_read(Order, :read, %{}, domain: Shop))
+
+      {:ok, std} =
+        AshDyan.Engine.Formatter.format(
+          %AshDyan.Request{type: :aggregate, column: :total_amount, function: :stddev},
+          records
+        )
+
+      {:ok, var} =
+        AshDyan.Engine.Formatter.format(
+          %AshDyan.Request{type: :aggregate, column: :total_amount, function: :variance},
+          records
+        )
+
+      {:ok, med} =
+        AshDyan.Engine.Formatter.format(
+          %AshDyan.Request{type: :aggregate, column: :total_amount, function: :median},
+          records
+        )
+
+      # values [10,20,30,50,100,200]; median (p50) = 40.0
+      assert Decimal.equal?(hd(med.series).data |> hd(), Decimal.new("40.0"))
+      # variance > 0 and stddev ~= sqrt(variance)
+      [v] = hd(var.series).data
+      [s] = hd(std.series).data
+      assert v > 0
+      assert abs(s - :math.sqrt(v)) < 0.01
+    end
+  end
+
+  describe "histogram" do
+    test "bins numeric values into a chart-ready distribution" do
+      records = read(Order, Ash.Query.for_read(Order, :read, %{}, domain: Shop))
+
+      {:ok, result} =
+        AshDyan.Engine.Formatter.format(
+          %AshDyan.Request{type: :histogram, column: :total_amount, bins: 5},
+          records
+        )
+
+      assert result.type == :histogram
+      # 5 bins, counts sum to the 6 non-nil values.
+      assert length(result.labels) == 5
+      assert Enum.sum(hd(result.series).data) == 6
+    end
+
+    test "histogram with group_by aligns series to shared bins" do
+      records = read(Order, Ash.Query.for_read(Order, :read, %{}, domain: Shop))
+
+      {:ok, result} =
+        AshDyan.Engine.Formatter.format(
+          %AshDyan.Request{type: :histogram, column: :total_amount, bins: 5, group_by: [:region]},
+          records
+        )
+
+      # EU, US, APAC -> three series, all aligned to the same 5 bin labels.
+      assert length(result.series) == 3
+      assert Enum.all?(result.series, fn s -> length(s.data) == 5 end)
+    end
+
+    test "histogram rejects a non-positive bins value" do
+      assert {:error, %AshDyan.Error{field: :bins, reason: :bad_bins}} =
+               AshDyan.run(%{
+                 resource: Order,
+                 domain: Shop,
+                 type: :histogram,
+                 column: :total_amount,
+                 bins: 0
+               })
+    end
+  end
+
+  describe "charts" do
+    test "recommend picks a sensible default chart type" do
+      freq = AshDyan.run!(%{resource: Order, domain: Shop, type: :frequency, column: :status}, data: Seed.order_rows())
+      time = AshDyan.run!(%{resource: Order, domain: Shop, type: :time_bucket, time_field: :inserted_at, bucket: :day, column: :total_amount, function: :sum}, data: Seed.order_rows())
+      hist = AshDyan.Engine.Formatter.format(%AshDyan.Request{type: :histogram, column: :total_amount, bins: 5}, Seed.order_rows())
+
+      {:ok, hist} = hist
+
+      assert AshDyan.Charts.recommend(freq) == :pie
+      assert AshDyan.Charts.recommend(time) == :line
+      assert AshDyan.Charts.recommend(hist) == :histogram
+    end
+
+    test "to_chartjs produces a JSON-encodable map" do
+      result = AshDyan.run!(%{resource: Order, domain: Shop, type: :frequency, column: :status}, data: Seed.order_rows())
+      chart = AshDyan.Charts.to_chartjs(result)
+      assert is_map(chart["data"])
+      assert is_list(chart["data"]["datasets"])
+      assert {:ok, _} = Jason.encode(chart)
+    end
+
+    test "to_echarts produces a JSON-encodable option map" do
+      result = AshDyan.run!(%{resource: Order, domain: Shop, type: :time_bucket, time_field: :inserted_at, bucket: :day, column: :total_amount, function: :sum}, data: Seed.order_rows())
+      option = AshDyan.Charts.to_echarts(result)
+      assert is_list(option["series"])
+      assert {:ok, _} = Jason.encode(option)
     end
   end
 end

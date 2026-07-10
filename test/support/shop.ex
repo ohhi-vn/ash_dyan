@@ -7,7 +7,7 @@ defmodule AshDyan.Test.Shop do
     resource(AshDyan.Test.Order)
   end
 
-  dynal do
+  dyan do
     analyzable_resource(AshDyan.Test.Order)
   end
 end

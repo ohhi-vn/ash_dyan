@@ -1,9 +1,10 @@
 defmodule AshDyan.Test.Plain do
   @moduledoc false
 
-  # A valid Ash resource that intentionally has NO `dynal` section, used to
+  # A valid Ash resource that intentionally has NO `dyan` section, used to
   # exercise the `:not_analyzable` validation path.
   use Ash.Resource,
+    domain: nil,
     data_layer: Ash.DataLayer.Simple
 
   attributes do

@@ -1,10 +1,10 @@
 defmodule AshDyan.Dsl.Domain.Verifiers.ValidateAnalyzableResources do
   @moduledoc """
-  Validates the domain-level `dynal` registry after compilation.
+  Validates the domain-level `dyan` registry after compilation.
 
   - Rejects `analyzable_resource` referencing a module that is not an Ash
     resource.
-  - Rejects `analyzable_resource` referencing a resource that has no `dynal`
+  - Rejects `analyzable_resource` referencing a resource that has no `dyan`
     configuration (i.e. is not actually analyzable).
   """
 
@@ -15,7 +15,7 @@ defmodule AshDyan.Dsl.Domain.Verifiers.ValidateAnalyzableResources do
 
     errors =
       dsl_state
-      |> Spark.Dsl.Verifier.get_entities([:dynal])
+      |> Spark.Dsl.Verifier.get_entities([:dyan])
       |> Enum.flat_map(fn %{resource: resource} ->
         validate_resource(resource)
       end)
@@ -29,12 +29,12 @@ defmodule AshDyan.Dsl.Domain.Verifiers.ValidateAnalyzableResources do
   defp validate_resource(resource) do
     cond do
       not Code.ensure_loaded?(resource) or not Ash.Resource.Info.resource?(resource) ->
-        ["dynal: analyzable_resource #{inspect(resource)} is not an Ash resource"]
+        ["dyan: analyzable_resource #{inspect(resource)} is not an Ash resource"]
 
       not analyzable?(resource) ->
         [
-          "dynal: analyzable_resource #{inspect(resource)} has no `dynal` configuration; " <>
-            "add `extensions: [AshDyan]` and a `dynal` section to it"
+          "dyan: analyzable_resource #{inspect(resource)} has no `dyan` configuration; " <>
+            "add `extensions: [AshDyan]` and a `dyan` section to it"
         ]
 
       true ->
@@ -46,7 +46,7 @@ defmodule AshDyan.Dsl.Domain.Verifiers.ValidateAnalyzableResources do
   # dependency on the `AshDyan` module (which would create a cycle through
   # this verifier and break Spark's `use` macro expansion).
   defp analyzable?(resource) do
-    case Spark.Dsl.Extension.get_entities(resource, [:dynal]) do
+    case Spark.Dsl.Extension.get_entities(resource, [:dyan]) do
       nil -> false
       [] -> false
       _ -> true

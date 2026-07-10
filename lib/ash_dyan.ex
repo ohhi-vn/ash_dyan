@@ -18,7 +18,7 @@ defmodule AshDyan do
 
   ## Security model
 
-  The `dynal` DSL is a whitelist. A runtime request can only reference fields,
+  The `dyan` DSL is a whitelist. A runtime request can only reference fields,
   functions, buckets, and filter targets declared there — this is what makes
   "arbitrary column + arbitrary filter from the client" safe rather than an
   injection/DoS vector.
@@ -58,12 +58,15 @@ defmodule AshDyan do
         doc: "The attribute (or, for percentiles, the numeric field) to analyze."
       ],
       type: [
-        type: {:one_of, [:frequency, :aggregate, :time_bucket, :percentile]},
+        type: {:one_of, [:frequency, :aggregate, :time_bucket, :percentile, :histogram]},
         required: true,
         doc: "The kind of analysis this declaration enables."
       ],
       functions: [
-        type: {:list, {:one_of, [:sum, :avg, :min, :max]}},
+        type:
+          {:list,
+           {:one_of,
+            [:sum, :avg, :min, :max, :count, :count_distinct, :stddev, :variance, :median]}},
         required: false,
         default: [],
         doc: "For `:aggregate`, which functions are allowed."
@@ -80,6 +83,17 @@ defmodule AshDyan do
         default: [],
         doc: "For `:percentile`, which percentile values are allowed."
       ],
+      bins: [
+        type: :pos_integer,
+        required: false,
+        default: 10,
+        doc: "For `:histogram`, the default number of bins (overridable per request)."
+      ],
+      bin_width: [
+        type: :number,
+        required: false,
+        doc: "For `:histogram`, a fixed bin width (auto-computed from the data range when omitted)."
+      ],
       time_field: [
         type: :atom,
         required: false,
@@ -89,8 +103,8 @@ defmodule AshDyan do
     transform: {__MODULE__, :normalize_analyzable_field, []}
   }
 
-  @dynal %Spark.Dsl.Section{
-    name: :dynal,
+  @dyan %Spark.Dsl.Section{
+    name: :dyan,
     describe: """
     Declares which fields of a resource may be analyzed at runtime, and how.
 
@@ -135,7 +149,7 @@ defmodule AshDyan do
   }
 
   use Spark.Dsl.Extension,
-    sections: [@dynal],
+    sections: [@dyan],
     transformers: [AshDyan.Dsl.Transformers.SetDefaults],
     verifiers: [AshDyan.Dsl.Verifiers.ValidateAnalyzableFields]
 
@@ -226,7 +240,8 @@ defmodule AshDyan do
   @doc """
   Returns true if the resource's data layer supports the given capability.
 
-  Capabilities: `:frequency`, `:aggregate`, `:time_bucket`, `:percentile`.
+  Capabilities: `:frequency`, `:aggregate`, `:time_bucket`, `:percentile`,
+  `:histogram`.
 
   This is surfaced explicitly so callers can discover data-layer limits before
   issuing a query, rather than discovering them at query time.
@@ -237,10 +252,11 @@ defmodule AshDyan do
   end
 
   @typedoc "Analysis capabilities exposed by AshDyan."
-  @type capability :: :frequency | :aggregate | :time_bucket | :percentile
+  @type capability :: :frequency | :aggregate | :time_bucket | :percentile | :histogram
 
   @typedoc "Numeric aggregate functions."
-  @type aggregate_function :: :sum | :avg | :min | :max
+  @type aggregate_function ::
+          :sum | :avg | :min | :max | :count | :count_distinct | :stddev | :variance | :median
 
   @typedoc "Time bucket granularities."
   @type time_bucket :: :minute | :hour | :day | :week | :month | :quarter | :year

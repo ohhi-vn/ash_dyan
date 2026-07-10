@@ -3,6 +3,7 @@ defmodule AshDyan.Test.Order do
 
   use Ash.Resource,
     extensions: [AshDyan],
+    domain: AshDyan.Test.Shop,
     data_layer: Ash.DataLayer.Simple
 
   attributes do
@@ -25,11 +26,12 @@ defmodule AshDyan.Test.Order do
     defaults([:create, :read, :update, :destroy])
   end
 
-  dynal do
+  dyan do
     analyzable_field(:status, type: :frequency)
-    analyzable_field(:total_amount, type: :aggregate, functions: [:sum, :avg, :min, :max])
+    analyzable_field(:total_amount, type: :aggregate, functions: [:sum, :avg, :min, :max, :count, :count_distinct, :stddev, :variance, :median])
     analyzable_field(:inserted_at, type: :time_bucket, buckets: [:day, :week, :month])
     analyzable_field(:total_amount, type: :percentile, percentiles: [50, 90, 99])
+    analyzable_field(:total_amount, type: :histogram, bins: 5)
 
     max_group_by(3)
     default_limit(100)

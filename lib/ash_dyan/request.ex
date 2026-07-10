@@ -4,26 +4,28 @@ defmodule AshDyan.Request do
 
   A caller sends a map (or a `t/0` struct) describing what chart data they want.
   `normalize/1` fills in defaults and `validate/1` checks it against the
-  resource's `dynal` DSL whitelist.
+  resource's `dyan` DSL whitelist.
 
   ## Shape
 
       %{
         domain: MyApp.Shop,
         resource: MyApp.Order,
-        type: :time_bucket,          # :frequency | :aggregate | :time_bucket | :percentile
+        type: :time_bucket,          # :frequency | :aggregate | :time_bucket | :percentile | :histogram
         column: :total_amount,
-        function: :sum,               # required for :aggregate/:percentile
+        function: :sum,               # required for :aggregate
         bucket: :day,                 # required for :time_bucket
         time_field: :inserted_at,
         group_by: [:status],          # optional, checked against max_group_by
         percentiles: [50, 90],        # required for :percentile
+        bins: 10,                     # optional for :histogram (default 10)
+        bin_width: nil,               # optional for :histogram (auto-computed if nil)
         filters: %{status: "paid", region: ["EU", "US"]},
         limit: 200
       }
   """
 
-  @type analysis_type :: :frequency | :aggregate | :time_bucket | :percentile
+  @type analysis_type :: :frequency | :aggregate | :time_bucket | :percentile | :histogram
   @type t :: %__MODULE__{
           domain: module() | nil,
           resource: module(),
@@ -34,6 +36,8 @@ defmodule AshDyan.Request do
           time_field: atom() | nil,
           group_by: [atom()],
           percentiles: [pos_integer()],
+          bins: pos_integer() | nil,
+          bin_width: number() | nil,
           filters: map(),
           limit: pos_integer() | nil
         }
@@ -49,6 +53,8 @@ defmodule AshDyan.Request do
     :limit,
     group_by: [],
     percentiles: [],
+    bins: nil,
+    bin_width: nil,
     filters: %{}
   ]
 
@@ -67,6 +73,8 @@ defmodule AshDyan.Request do
       time_field: normalize_atom(Map.get(map, :time_field) || Map.get(map, "time_field")),
       group_by: normalize_atoms(Map.get(map, :group_by) || Map.get(map, "group_by") || []),
       percentiles: Map.get(map, :percentiles) || Map.get(map, "percentiles") || [],
+      bins: Map.get(map, :bins) || Map.get(map, "bins"),
+      bin_width: Map.get(map, :bin_width) || Map.get(map, "bin_width"),
       filters: normalize_filters(Map.get(map, :filters) || Map.get(map, "filters") || %{}),
       limit: Map.get(map, :limit) || Map.get(map, "limit")
     }
@@ -101,7 +109,7 @@ defmodule AshDyan.Request do
   defp normalize_filters(other), do: other
 
   @doc """
-  Validate a normalized request against the resource's `dynal` DSL whitelist.
+  Validate a normalized request against the resource's `dyan` DSL whitelist.
 
   Returns `:ok` or `{:error, %AshDyan.Error{}}` naming the offending field.
 
@@ -110,13 +118,14 @@ defmodule AshDyan.Request do
   The `reason` field of the returned `AshDyan.Error` is one of:
 
   - `:not_a_resource` / `:not_analyzable` — the `:resource` is invalid or has
-    no `dynal` configuration.
-  - `:unknown_type` — `:type` is not one of the four capabilities.
+    no `dyan` configuration.
+  - `:unknown_type` — `:type` is not one of the capabilities.
   - `:not_analyzable` — `:column`/`time_field` is not whitelisted for the type.
   - `:not_allowed` — `:function`/`:bucket`/`:percentiles` is not in the
     whitelist for that field, or `:filters` references a non-allowed field.
   - `:too_many` — `:group_by` exceeds `max_group_by`.
   - `:too_large` — `:limit` exceeds `max_limit`.
+  - `:bad_bins` — `:bins`/`:bin_width` is of the wrong type or non-positive.
   - `:unknown_attribute` — `:group_by` references a non-existent attribute.
   - `:bad_type` — `:filters`/`limit` is of the wrong type.
   """
@@ -128,6 +137,7 @@ defmodule AshDyan.Request do
          :ok <- validate_function(request),
          :ok <- validate_bucket(request),
          :ok <- validate_percentiles(request),
+         :ok <- validate_histogram(request),
          :ok <- validate_group_by(request),
          :ok <- validate_filters(request),
          :ok <- validate_limit(request) do
@@ -148,7 +158,7 @@ defmodule AshDyan.Request do
          AshDyan.Error.exception(
            field: :resource,
            reason: :not_analyzable,
-           message: "#{inspect(resource)} is not analyzable (no `dynal` section)"
+           message: "#{inspect(resource)} is not analyzable (no `dyan` section)"
          )}
       end
     else
@@ -162,7 +172,7 @@ defmodule AshDyan.Request do
   end
 
   defp validate_type(%{type: type})
-       when type in [:frequency, :aggregate, :time_bucket, :percentile],
+       when type in [:frequency, :aggregate, :time_bucket, :percentile, :histogram],
        do: :ok
 
   defp validate_type(%{type: type}) do
@@ -171,7 +181,7 @@ defmodule AshDyan.Request do
        field: :type,
        reason: :unknown_type,
        message:
-         "type must be one of :frequency, :aggregate, :time_bucket, :percentile, got #{inspect(type)}"
+         "type must be one of :frequency, :aggregate, :time_bucket, :percentile, :histogram, got #{inspect(type)}"
      )}
   end
 
@@ -233,6 +243,23 @@ defmodule AshDyan.Request do
          field: :time_field,
          reason: :not_analyzable,
          message: "time field :#{time_field} is not declared as analyzable for type :time_bucket"
+       )}
+    end
+  end
+
+  defp validate_column(%{type: :histogram, column: nil}) do
+    {:error, AshDyan.Error.exception(field: :column, message: ":histogram requires a :column")}
+  end
+
+  defp validate_column(%{type: :histogram, column: column, resource: resource}) do
+    if AshDyan.Info.analyzable_field(resource, column, :histogram) do
+      :ok
+    else
+      {:error,
+       AshDyan.Error.exception(
+         field: :column,
+         reason: :not_analyzable,
+         message: "column :#{column} is not declared as analyzable for type :histogram"
        )}
     end
   end
@@ -309,6 +336,31 @@ defmodule AshDyan.Request do
   end
 
   defp validate_percentiles(_request), do: :ok
+
+  defp validate_histogram(%{type: :histogram, bins: bins, bin_width: bin_width}) do
+    cond do
+      not is_nil(bins) and not (is_integer(bins) and bins > 0) ->
+        {:error,
+         AshDyan.Error.exception(
+           field: :bins,
+           reason: :bad_bins,
+           message: ":bins must be a positive integer, got #{inspect(bins)}"
+         )}
+
+      not is_nil(bin_width) and not (is_number(bin_width) and bin_width > 0) ->
+        {:error,
+         AshDyan.Error.exception(
+           field: :bin_width,
+           reason: :bad_bins,
+           message: ":bin_width must be a positive number, got #{inspect(bin_width)}"
+         )}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_histogram(_request), do: :ok
 
   defp validate_group_by(%{resource: resource, group_by: group_by}) do
     max = AshDyan.Info.max_group_by(resource)

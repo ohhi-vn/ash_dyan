@@ -5,7 +5,7 @@ dynamic analyses against it at runtime.
 
 ## 1. Declare a resource as analyzable
 
-Add `AshDyan` to the resource's extensions and open a `dynal` section. Each
+Add `AshDyan` to the resource's extensions and open a `dyan` section. Each
 `analyzable_field` is a **whitelist entry**: a runtime request may only reference
 fields, functions, buckets, and percentiles declared here.
 
@@ -26,13 +26,13 @@ defmodule MyApp.Order do
     defaults([:create, :read, :update, :destroy])
   end
 
-  dynal do
+  dyan do
     # Count occurrences of a categorical column.
     analyzable_field :status, type: :frequency
 
     # Numeric aggregates over a column.
     analyzable_field :total_amount, type: :aggregate,
-      functions: [:sum, :avg, :min, :max]
+      functions: [:sum, :avg, :min, :max, :count, :count_distinct, :stddev, :variance, :median]
 
     # Time-bucketed aggregates (in-memory bucketing on any data layer).
     analyzable_field :inserted_at, type: :time_bucket,
@@ -41,6 +41,9 @@ defmodule MyApp.Order do
     # In-memory percentiles.
     analyzable_field :total_amount, type: :percentile,
       percentiles: [50, 90, 99]
+
+    # Numeric distribution into bins (histogram).
+    analyzable_field :total_amount, type: :histogram, bins: 10
 
     # Limits & guards.
     max_group_by 3
@@ -66,22 +69,24 @@ end
 
 | Option        | Applies to                | Meaning                                  |
 | ------------- | ------------------------- | ---------------------------------------- |
-| `type`        | all                       | `:frequency` / `:aggregate` / `:time_bucket` / `:percentile` |
-| `functions`   | `:aggregate`              | Allowed aggregate functions.                |
+| `type`        | all                       | `:frequency` / `:aggregate` / `:time_bucket` / `:percentile` / `:histogram` |
+| `functions`   | `:aggregate`              | Allowed aggregate functions: `:sum`, `:avg`, `:min`, `:max`, `:count`, `:count_distinct`, `:stddev`, `:variance`, `:median`. |
 | `buckets`     | `:time_bucket`            | Allowed bucket granularities.              |
 | `percentiles` | `:percentile`            | Allowed percentile values.                 |
 | `time_field`  | `:time_bucket`            | Time attribute to bucket on (defaults to `name`). |
+| `bins`        | `:histogram`              | Number of bins (default 10).                |
+| `bin_width`   | `:histogram`              | Fixed bin width; auto-computed from the data range when omitted. |
 
 ## 2. (Optional) Register resources on a domain
 
-The domain `dynal` section is a thin discovery registry. Cross-resource joins are
+The domain `dyan` section is a thin discovery registry. Cross-resource joins are
 out of scope for v1.
 
 ```elixir
 defmodule MyApp.Shop do
   use Ash.Domain, extensions: [AshDyan.Domain]
 
-  dynal do
+  dyan do
     analyzable_resource MyApp.Order
   end
 end
@@ -111,12 +116,14 @@ spec = %{
 | -------------- | -------------------------------------- | --------------------------------------------- |
 | `resource`     | always                                | Must be an analyzable Ash resource.            |
 | `domain`       | recommended                           | Used to resolve the read action.               |
-| `type`         | always                                | One of the four capabilities.                   |
-| `column`       | `:frequency` / `:aggregate` / `:percentile` | The metric/attribute to analyze.           |
+| `type`         | always                                | One of the five capabilities.                   |
+| `column`       | `:frequency` / `:aggregate` / `:percentile` / `:histogram` | The metric/attribute to analyze.           |
 | `function`     | `:aggregate`                          | One of the whitelisted functions.              |
 | `bucket`       | `:time_bucket`                        | One of the whitelisted buckets.                |
 | `time_field`   | `:time_bucket`                        | Defaults to `column`.                         |
 | `percentiles`  | `:percentile`                         | List of whitelisted percentile values.         |
+| `bins`         | `:histogram`                          | Number of bins (default 10).                   |
+| `bin_width`    | `:histogram`                          | Fixed bin width; auto-computed when omitted.   |
 | `group_by`     | optional                               | Checked against `max_group_by`.               |
 | `filters`      | optional                               | Only `allow_filters_on` fields are permitted. |
 | `limit`        | optional                               | Capped at `max_limit`.                       |
@@ -173,6 +180,9 @@ chart adapter needs no per-type branching.
   (or a single series named after the function).
 - `:percentile` — `labels` are percentile labels (`"50th"`, ...); series per
   group_by combination (or a single series named after the column).
+- `:histogram` — `labels` are bin ranges (`"0.0-50.0"`, ...); series per group_by
+  combination (or a single series named after the column). Counts are aligned to
+  the shared bin axis so a chart adapter needs no per-type branching.
 
 ## 6. Errors
 
@@ -224,7 +234,7 @@ Filter contents are never logged.
 ## 10. Analysis types supported
 
 AshDyan exposes four analysis capabilities. Each must be whitelisted per field
-in the resource's `dynal` section (see §1) and is gated by the resource's data
+in the resource's `dyan` section (see §1) and is gated by the resource's data
 layer (see §7).
 
 | Type           | What it computes                                              | Required request fields                          | `group_by` |
@@ -253,24 +263,59 @@ Not every data layer can serve every type. `AshDyan.supports?/2` (§7) reflects
 this matrix; a request for an unsupported type returns
 `{:error, %AshDyan.Error{field: :type, reason: :unsupported_data_layer}}`.
 
-| Data layer                       | `:frequency` | `:aggregate` | `:time_bucket` | `:percentile` |
-| -------------------------------- | ------------ | ------------ | -------------- | ------------- |
-| `AshPostgres`                    | yes          | yes          | yes            | yes           |
-| `Ash.DataLayer.Simple` (ETS)     | yes          | yes          | yes            | no (v1)       |
-| Other / unknown (Default)        | yes          | yes          | no             | no            |
+| Data layer                       | `:frequency` | `:aggregate` | `:time_bucket` | `:percentile` | `:histogram` |
+| -------------------------------- | ------------ | ------------ | -------------- | ------------- | ------------ |
+| `AshPostgres`                    | yes          | yes          | yes            | yes           | yes          |
+| `Ash.DataLayer.Simple` (ETS)     | yes          | yes          | yes            | no (v1)       | yes          |
+| Other / unknown (Default)        | yes          | yes          | no             | no            | no           |
 
-- **Postgres** — all four capabilities are supported.
-- **Simple (ETS, in-memory)** — `:frequency`, `:aggregate`, and `:time_bucket`
-  are computed in memory; `:percentile` is rejected by policy in v1.
+- **Postgres** — all five capabilities are supported.
+- **Simple (ETS, in-memory)** — `:frequency`, `:aggregate`, `:time_bucket`, and
+  `:histogram` are computed in memory; `:percentile` is rejected by policy in v1.
 - **Default (any other layer)** — only the universally-safe `:frequency` and
-  `:aggregate` are allowed; `:time_bucket` and `:percentile` are rejected with a
-  clear error rather than silently wrong results.
+  `:aggregate` are allowed; `:time_bucket`, `:percentile`, and `:histogram` are
+  rejected with a clear error rather than silently wrong results.
 
-## 11. Limitations
+## 11. Chart-ready output (AshDyan.Charts)
+
+Every analysis type returns the same `labels`/`series` shape. The `AshDyan.Charts`
+module turns a result into chart-library-ready shapes so a client can render a
+chart without knowing AshDyan's internals.
+
+```elixir
+{:ok, result} = AshDyan.run(spec)
+
+# Pick a sensible default chart type from the result shape.
+AshDyan.Charts.recommend(result)
+# => :bar | :line | :area | :pie | :donut | :histogram | :scatter
+
+# Serialize for a specific library (both return JSON-encodable maps).
+AshDyan.Charts.to_chartjs(result)        # Chart.js `data`/`options`
+AshDyan.Charts.to_echarts(result)        # ECharts `option`
+
+# Or force a chart type:
+AshDyan.Charts.to_chartjs(result, :line)
+```
+
+`recommend/1` maps result types to chart types:
+
+| Result `type`   | Default chart (`recommend/1`) |
+| --------------- | ------------------------------ |
+| `:frequency`    | `:bar` (`:pie` for a single series) |
+| `:aggregate`    | `:bar` (`:pie` for a single series) |
+| `:time_bucket`  | `:line`                        |
+| `:percentile`   | `:line`                        |
+| `:histogram`    | `:histogram`                   |
+
+The serialized maps are plain (JSON-encodable) structures: `to_chartjs/2` returns
+`%{type:, data: %{labels:, datasets:}, options:}` and `to_echarts/2` returns an
+ECharts `option` map (`%{tooltip:, legend:, xAxis:, yAxis:, series:}`).
+
+## 12. Limitations
 
 v1 is intentionally scoped. Known limitations:
 
-- **No cross-resource joins.** The domain `dynal` registry (§2) is discovery-only;
+- **No cross-resource joins.** The domain `dyan` registry (§2) is discovery-only;
   analyses run against a single resource.
 - **In-memory aggregation.** The engine selects only the needed columns, applies
   the caller's filters and the configured `limit` (a hard cap), runs the query
@@ -287,7 +332,7 @@ v1 is intentionally scoped. Known limitations:
   skipped (guarded by `Ash.DataLayer.data_layer_can?/2`) so tests and embedded
   resources keep working.
 - **Whitelist-only fields.** A request may only reference fields, functions,
-  buckets, percentiles, and filter targets declared in the `dynal` section.
+  buckets, percentiles, and filter targets declared in the `dyan` section.
   Anything else is rejected during validation with a stable `reason` atom (§6).
 - **Filters are restricted and internal.** Only `allow_filters_on` attributes may
   be filtered, and they are parsed as internal Ash filters (so they need not be

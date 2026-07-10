@@ -19,7 +19,7 @@ defmodule AshDyan.Engine do
   4. aggregates the returned rows in memory into the stable `labels`/`series`
      output shape.
 
-  This keeps the security boundary (the `dynal` DSL whitelist + enforced limits)
+  This keeps the security boundary (the `dyan` DSL whitelist + enforced limits)
   intact while avoiding data-layer-specific query shapes. Percentiles, in
   particular, are computed in memory so they work on any data layer; the
   capability check still surfaces data-layer limits explicitly via
@@ -109,10 +109,14 @@ defmodule AshDyan.Engine do
     Ash.Query.select(query, Enum.uniq([column | group_by]))
   end
 
+  defp apply_select(query, %{type: :histogram, column: column, group_by: group_by}) do
+    Ash.Query.select(query, Enum.uniq([column | group_by]))
+  end
+
   defp apply_filters(query, %{filters: filters}) when filters == %{}, do: query
 
   defp apply_filters(query, %{filters: filters}) do
-    # Request filters are already validated against the `dynal` whitelist
+    # Request filters are already validated against the `dyan` whitelist
     # (`allow_filters_on`), so we parse them as internal filters (which does not
     # require the attributes to be `public?`) and attach them to the query.
     #

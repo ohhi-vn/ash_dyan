@@ -39,6 +39,10 @@ defmodule AshDyan.Engine.Formatter do
     {:ok, percentile(request, records)}
   end
 
+  def format(%Request{type: :histogram} = request, records) do
+    {:ok, histogram(request, records)}
+  end
+
   # --- frequency ---
 
   defp frequency(%{column: column, group_by: []}, records) do
@@ -105,11 +109,11 @@ defmodule AshDyan.Engine.Formatter do
     enriched =
       Enum.map(records, fn row ->
         ts = Map.get(row, time_field)
-        Map.put(row, :__dynal_bucket__, AshDyan.Engine.TimeBucket.label(ts, bucket))
+        Map.put(row, :__dyan_bucket__, AshDyan.Engine.TimeBucket.label(ts, bucket))
       end)
 
     if group_by == [] do
-      grouped = Enum.group_by(enriched, fn row -> row.__dynal_bucket__ end)
+      grouped = Enum.group_by(enriched, fn row -> row.__dyan_bucket__ end)
 
       labels = Map.keys(grouped) |> Enum.sort()
 
@@ -127,7 +131,7 @@ defmodule AshDyan.Engine.Formatter do
     else
       pivot(
         enriched,
-        :__dynal_bucket__,
+        :__dyan_bucket__,
         group_by,
         fn rows ->
           apply_agg(function || :count, Enum.map(rows, fn row -> Map.get(row, column) end))
@@ -209,16 +213,164 @@ defmodule AshDyan.Engine.Formatter do
     Enum.map(group_by, fn g -> Map.get(row, g) end)
   end
 
-  defp apply_agg(:count, values), do: length(values)
-  defp apply_agg(:sum, values), do: aggregate_numbers(values, &Decimal.add/2, 0)
-  defp apply_agg(:min, values), do: safe_enum(values, &Enum.min/1)
-  defp apply_agg(:max, values), do: safe_enum(values, &Enum.max/1)
-  defp apply_agg(:avg, values), do: average_numbers(values)
+  # --- histogram ---
+
+  # Numeric distribution into bins. `bin_width` is auto-computed from the data
+  # range when not supplied; `bins` (default 10) controls the count. The result
+  # is chart-ready: `labels` are bin ranges ("0.0-10.0"), `data` are counts.
+  defp histogram(%{column: column, bins: bins, bin_width: bin_width, group_by: []}, records) do
+    values = numeric_values(records, column)
+    {labels, data} = bin_counts(values, bins, bin_width)
+
+    %Result{
+      type: :histogram,
+      labels: labels,
+      series: [%{name: to_string(column), data: data}]
+    }
+  end
+
+  defp histogram(%{column: column, bins: bins, bin_width: bin_width, group_by: group_by}, records) do
+    grouped = Enum.group_by(records, fn row -> group_name(group_key(row, group_by)) end)
+
+    # Compute bins once from the full dataset so every group's series aligns to
+    # the same bin axis.
+    {base_min, base_bin_width, base_labels} =
+      records
+      |> numeric_values(column)
+      |> bin_spec(bins, bin_width)
+
+    series =
+      Enum.map(grouped, fn {name, rows} ->
+        values = numeric_values(rows, column)
+        data = bin_counts_with(values, base_min, base_bin_width, length(base_labels))
+        %{name: name, data: data}
+      end)
+
+    %Result{type: :histogram, labels: base_labels, series: series}
+  end
+
+  defp numeric_values(records, column) do
+    records
+    |> Enum.map(fn row -> Map.get(row, column) end)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.map(fn
+      %Decimal{} = d -> Decimal.to_float(d)
+      v -> v
+    end)
+    |> Enum.filter(&is_number/1)
+  end
+
+  # Returns {min, bin_width, labels} for the given values.
+  defp bin_spec([], _bins, _bin_width) do
+    {0.0, 1.0, [format_bin(0.0, 1.0)]}
+  end
+
+  defp bin_spec(values, bins, bin_width) do
+    min = Enum.min(values)
+    max = Enum.max(values)
+    {bin_width, _bin_count, labels} = compute_bins(min, max, bins, bin_width, nil)
+    {min, bin_width, labels}
+  end
+
+  # Counts values into `bin_count` bins starting at `min` with `bin_width`.
+  defp bin_counts_with(values, min, bin_width, bin_count) do
+    counts = List.duplicate(0, bin_count)
+
+    Enum.reduce(values, counts, fn v, acc ->
+      idx = min(trunc((v - min) / bin_width), bin_count - 1)
+      List.update_at(acc, idx, &(&1 + 1))
+    end)
+  end
+
+    defp bin_counts(value, bins, bin_width, base \\ nil)
+  defp bin_counts([], _bins, _bin_width, _base ) do
+    {[format_bin(0.0, 1.0)], [0]}
+  end
+
+  defp bin_counts(values, bins, bin_width, _base ) do
+    min = Enum.min(values)
+    {_, bin_width, labels} = compute_bins(min, Enum.max(values), bins, bin_width, nil)
+    {labels, bin_counts_with(values, min, bin_width, length(labels))}
+  end
+
+  defp compute_bins(min, max, bins, nil, nil) do
+    bin_count = max(bins || 10, 1)
+    span = max - min
+    bin_width = if span == 0, do: 1.0, else: span / bin_count
+    labels = Enum.map(0..(bin_count - 1), fn i ->
+      lo = min + i * bin_width
+      hi = lo + bin_width
+      format_bin(lo, hi)
+    end)
+    {bin_width, bin_count, labels}
+  end
+
+  defp compute_bins(min, max, _bins, bin_width, nil) when is_number(bin_width) do
+    bin_count = max(ceil((max - min) / bin_width), 1)
+    labels = Enum.map(0..(bin_count - 1), fn i ->
+      lo = min + i * bin_width
+      hi = lo + bin_width
+      format_bin(lo, hi)
+    end)
+    {bin_width, bin_count, labels}
+  end
+
+  defp format_bin(lo, hi) do
+    "#{format_num(lo)}-#{format_num(hi)}"
+  end
+
+  defp format_num(n) when is_float(n) do
+    # Trim trailing zeros for readability.
+    s = :io_lib.format("~.4f", [n]) |> to_string()
+    Regex.replace(~r/\.?0+$/, s, "")
+  end
+
+  defp format_num(n), do: to_string(n)
 
   defp safe_enum([], _fun), do: nil
   defp safe_enum(values, fun) do
     nums = Enum.reject(values, &is_nil/1)
     if nums == [], do: nil, else: fun.(nums)
+  end
+
+  defp apply_agg(:count, values), do: length(values)
+  defp apply_agg(:count_distinct, values), do: values |> Enum.reject(&is_nil/1) |> Enum.uniq() |> length()
+  defp apply_agg(:sum, values), do: aggregate_numbers(values, &Decimal.add/2, 0)
+  defp apply_agg(:min, values), do: safe_enum(values, &Enum.min/1)
+  defp apply_agg(:max, values), do: safe_enum(values, &Enum.max/1)
+  defp apply_agg(:avg, values), do: average_numbers(values)
+  defp apply_agg(:median, values), do: percentile_of(Enum.reject(values, &is_nil/1), 50)
+  defp apply_agg(:stddev, values), do: stddev(values)
+  defp apply_agg(:variance, values), do: variance(values)
+
+  defp stddev(values) do
+    case variance(values) do
+      nil -> nil
+      v -> :math.sqrt(v)
+    end
+  end
+
+  defp variance(values) do
+    nums = Enum.reject(values, &is_nil/1)
+    if nums == [], do: nil, else: variance_of(nums)
+  end
+
+  defp variance_of(nums) do
+    case Enum.find(nums, &(&1 != nil)) do
+      %Decimal{} ->
+        floats = Enum.map(nums, &Decimal.to_float/1)
+        variance_of_numbers(floats)
+
+      _ ->
+        variance_of_numbers(nums)
+    end
+  end
+
+  defp variance_of_numbers(nums) do
+    n = length(nums)
+    mean = Enum.sum(nums) / n
+    sum_sq = Enum.reduce(nums, 0, fn x, acc -> acc + :math.pow(x - mean, 2) end)
+    sum_sq / n
   end
 
   # `Decimal` does not implement Elixir's `Kernel.+/2`, so sum via `Decimal.add`.

@@ -2,7 +2,7 @@ defmodule AshDyan.Domain do
   @moduledoc """
   The `AshDyan` Spark DSL extension for domains.
 
-  Adds a `dynal do ... end` section to a domain declaring a registry of
+  Adds a `dyan do ... end` section to a domain declaring a registry of
   analyzable resources for discovery. Cross-resource joins are explicitly out of
   scope for v1.
 
@@ -15,7 +15,7 @@ defmodule AshDyan.Domain do
       defmodule MyApp.Shop do
         use Ash.Domain, extensions: [AshDyan.Domain]
 
-        dynal do
+        dyan do
           analyzable_resource MyApp.Order
           analyzable_resource MyApp.Invoice
         end
@@ -36,8 +36,8 @@ defmodule AshDyan.Domain do
     ]
   }
 
-  @dynal %Spark.Dsl.Section{
-    name: :dynal,
+  @dyan %Spark.Dsl.Section{
+    name: :dyan,
     describe: """
     Declares which resources in this domain are analyzable, for discovery.
 
@@ -50,6 +50,6 @@ defmodule AshDyan.Domain do
   }
 
   use Spark.Dsl.Extension,
-    sections: [@dynal],
+    sections: [@dyan],
     verifiers: [AshDyan.Dsl.Domain.Verifiers.ValidateAnalyzableResources]
 end

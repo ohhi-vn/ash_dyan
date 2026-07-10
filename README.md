@@ -22,7 +22,7 @@ end
 
 ## Security model
 
-The `dynal` DSL is a **whitelist**. The runtime request can only reference
+The `dyan` DSL is a **whitelist**. The runtime request can only reference
 fields, functions, buckets, and filter targets declared there — this is what
 makes "arbitrary column + arbitrary filter from the client" safe rather than an
 injection/DoS vector. Queries run through the resource's normal read action, so
@@ -35,11 +35,12 @@ defmodule MyApp.Order do
   use Ash.Resource,
     extensions: [AshDyan]
 
-  dynal do
+  dyan do
     analyzable_field :status, type: :frequency
-    analyzable_field :total_amount, type: :aggregate, functions: [:sum, :avg, :min, :max]
+    analyzable_field :total_amount, type: :aggregate, functions: [:sum, :avg, :min, :max, :count, :count_distinct, :stddev, :variance, :median]
     analyzable_field :inserted_at, type: :time_bucket, buckets: [:day, :week, :month]
     analyzable_field :total_amount, type: :percentile, percentiles: [50, 90, 99]
+    analyzable_field :total_amount, type: :histogram, bins: 10
 
     max_group_by 3
     default_limit 100
@@ -56,7 +57,7 @@ joins are out of scope for v1):
 defmodule MyApp.Shop do
   use Ash.Domain, extensions: [AshDyan.Domain]
 
-  dynal do
+  dyan do
     analyzable_resource MyApp.Order
   end
 end
@@ -68,13 +69,15 @@ end
 %{
   domain: MyApp.Shop,
   resource: MyApp.Order,
-  type: :time_bucket,          # :frequency | :aggregate | :time_bucket | :percentile
+  type: :time_bucket,          # :frequency | :aggregate | :time_bucket | :percentile | :histogram
   column: :total_amount,
-  function: :sum,               # required for :aggregate/:percentile
+  function: :sum,               # required for :aggregate
   bucket: :day,                 # required for :time_bucket
   time_field: :inserted_at,
   group_by: [:status],          # optional, checked against max_group_by
   percentiles: [50, 90],        # required for :percentile
+  bins: 10,                     # optional for :histogram (default 10)
+  bin_width: nil,               # optional for :histogram (auto-computed if nil)
   filters: %{status: "paid", region: ["EU", "US"]},
   limit: 200
 }
@@ -88,11 +91,13 @@ Run it:
 {:ok, result} = AshDyan.run(spec, actor: current_user)
 # with an explicit in-memory dataset (Ash.DataLayer.Simple / tests):
 {:ok, result} = AshDyan.run(spec, data: rows)
+# turn the result into a chart-library-ready shape:
+chart = AshDyan.Charts.to_chartjs(result)
 ```
 
 `AshDyan.run/1` (or `run/2` with an `actor`) is the single entry point. It:
 
-1. Validates the spec against the resource's `dynal` DSL config (unknown
+1. Validates the spec against the resource's `dyan` DSL config (unknown
    column/function → error naming the offending field, not silently ignored).
 2. Builds an `Ash.Query` selecting only the needed columns, applying the
    caller's filters and the configured `limit`.
@@ -119,7 +124,7 @@ client-side chart adapter doesn't need per-type branching.
 
 `AshDyan.run/1` is the single entry point. It:
 
-1. Validates the spec against the resource's `dynal` DSL config (unknown
+1. Validates the spec against the resource's `dyan` DSL config (unknown
    column/function → error naming the offending field, not silently ignored).
 2. Builds an `Ash.Query` that selects only the needed columns, applies the
    caller's filters (via `filter_input`, which honors field policies) and the
@@ -134,7 +139,7 @@ return shape of grouped aggregates is data-layer dependent. To keep AshDyan
 data-layer agnostic, safe, and predictable, the engine fetches only the columns
 it needs (bounded by `max_limit`, a hard cap that prevents a full-cardinality
 `group_by` from blowing up the DB) and aggregates in memory. This keeps the
-security boundary (the `dynal` DSL whitelist + enforced limits) intact while
+security boundary (the `dyan` DSL whitelist + enforced limits) intact while
 avoiding data-layer-specific query shapes. `TimeBucket.expr/2` is provided as a
 reference for a future Postgres `date_trunc` pushdown.
 
@@ -143,9 +148,11 @@ reference for a future Postgres `date_trunc` pushdown.
 | Capability            | Approach                                          | Data-layer dependency               |
 | --------------------- | ------------------------------------------------- | ------------------------------------ |
 | Frequency / group-by  | in-memory count after a filtered, limited read    | Any Ash data layer                   |
-| Numeric aggregates    | in-memory sum/avg/min/max after a filtered read   | Any Ash data layer                   |
+| Numeric aggregates    | in-memory sum/avg/min/max/count/count_distinct/   | Any Ash data layer                   |
+|                       | stddev/variance/median after a filtered read      |                                      |
 | Time bucketing        | in-memory bucket label (Postgres `date_trunc` ref)| Any Ash data layer                   |
 | Percentiles           | in-memory percentile computation                  | Any Ash data layer                   |
+| Histogram             | in-memory binning of a numeric column             | Any Ash data layer                   |
 
 All four capabilities therefore work on **any** Ash data layer. The capability
 check (`AshDyan.supports?/2`) still surfaces data-layer limits explicitly so
@@ -178,7 +185,7 @@ can do so by configuring `AshDyan.DataLayer.Simple` to return `false` for
 
 ## Milestones
 
-- **M0** — DSL scaffolding: `dynal` section/entities, `Info` module, verifiers.
+- **M0** — DSL scaffolding: `dyan` section/entities, `Info` module, verifiers.
 - **M1** — frequency + numeric aggregates, formatter, tests (ETS + Postgres-ready).
 - **M2** — time bucketing with Postgres `date_trunc` and ETS fallback.
 - **M3** — percentiles/histograms with capability-check API.

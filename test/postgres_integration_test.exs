@@ -13,10 +13,6 @@ defmodule AshDyan.PostgresIntegrationTest do
   @moduletag :postgres
 
   setup_all do
-    if System.get_env("RUN_POSTGRES") != "1" do
-      ExUnit.abort("set RUN_POSTGRES=1 to run Postgres integration tests")
-    end
-
     :ok
   end
 

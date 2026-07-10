@@ -1,6 +1,6 @@
 defmodule AshDyan.Dsl.Domain.AnalyzableResource do
   @moduledoc """
-  Struct describing a single `analyzable_resource` declared in the `dynal` DSL
+  Struct describing a single `analyzable_resource` declared in the `dyan` DSL
   section of a Domain.
 
   This is a thin registry for resource discovery. Cross-resource joins are out

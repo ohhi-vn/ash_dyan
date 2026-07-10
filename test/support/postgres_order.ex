@@ -26,7 +26,7 @@ defmodule AshDyan.Test.PostgresOrder do
     defaults([:create, :read, :update, :destroy])
   end
 
-  dynal do
+  dyan do
     analyzable_field(:status, type: :frequency)
     analyzable_field(:total_amount, type: :aggregate, functions: [:sum, :avg, :min, :max])
     analyzable_field(:inserted_at, type: :time_bucket, buckets: [:day, :week, :month])
@@ -39,7 +39,7 @@ defmodule AshDyan.Test.PostgresOrder do
   end
 
   postgres do
-    table("dynal_postgres_orders")
+    table("dyan_postgres_orders")
     repo(AshDyan.Test.Repo)
   end
 end

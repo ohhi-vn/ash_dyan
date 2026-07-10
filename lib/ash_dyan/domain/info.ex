@@ -1,6 +1,6 @@
 defmodule AshDyan.Domain.Info do
   @moduledoc """
-  Introspection helpers for the domain-level `dynal` registry.
+  Introspection helpers for the domain-level `dyan` registry.
   """
 
   alias AshDyan.Dsl.Domain.AnalyzableResource
@@ -9,7 +9,7 @@ defmodule AshDyan.Domain.Info do
   @spec analyzable_resources(module()) :: [module()]
   def analyzable_resources(domain) do
     domain
-    |> Spark.Dsl.Extension.get_entities([:dynal])
+    |> Spark.Dsl.Extension.get_entities([:dyan])
     |> Enum.map(fn %AnalyzableResource{resource: resource} -> resource end)
   end
 end

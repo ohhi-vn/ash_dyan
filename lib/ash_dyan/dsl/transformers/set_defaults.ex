@@ -1,6 +1,6 @@
 defmodule AshDyan.Dsl.Transformers.SetDefaults do
   @moduledoc """
-  Compile-time transformer that persists a normalized view of the `dynal`
+  Compile-time transformer that persists a normalized view of the `dyan`
   configuration onto the resource for fast runtime access.
 
   Empty-list validation for `:aggregate`/`time_bucket`/`percentile` declarations
@@ -12,7 +12,7 @@ defmodule AshDyan.Dsl.Transformers.SetDefaults do
   def transform(dsl_state) do
     fields =
       dsl_state
-      |> Spark.Dsl.Transformer.get_entities([:dynal])
+      |> Spark.Dsl.Transformer.get_entities([:dyan])
       |> Enum.map(fn field ->
         %{
           name: field.name,
@@ -20,6 +20,8 @@ defmodule AshDyan.Dsl.Transformers.SetDefaults do
           functions: field.functions,
           buckets: field.buckets,
           percentiles: field.percentiles,
+          bins: field.bins,
+          bin_width: field.bin_width,
           time_field: field.time_field
         }
       end)
