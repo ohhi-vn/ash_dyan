@@ -1,5 +1,7 @@
 # AshDyan
 
+> **Note:** This library is under active development, unstable and the API may change.
+
 Runtime-driven dynamic analysis for any Ash resource. Turn "give me a chart of X
 grouped by Y, filtered by Z" into a generic, safe, reusable runtime capability —
 instead of writing a bespoke aggregate action per chart.
