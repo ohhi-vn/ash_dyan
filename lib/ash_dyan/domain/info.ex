@@ -1,0 +1,15 @@
+defmodule AshDyan.Domain.Info do
+  @moduledoc """
+  Introspection helpers for the domain-level `dynal` registry.
+  """
+
+  alias AshDyan.Dsl.Domain.AnalyzableResource
+
+  @doc "Returns the list of registered analyzable resources for a domain."
+  @spec analyzable_resources(module()) :: [module()]
+  def analyzable_resources(domain) do
+    domain
+    |> Spark.Dsl.Extension.get_entities([:dynal])
+    |> Enum.map(fn %AnalyzableResource{resource: resource} -> resource end)
+  end
+end

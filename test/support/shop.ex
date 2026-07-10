@@ -1,13 +1,13 @@
-defmodule AshDynal.Test.Shop do
+defmodule AshDyan.Test.Shop do
   @moduledoc false
 
-  use Ash.Domain, extensions: [AshDynal.Domain]
+  use Ash.Domain, extensions: [AshDyan.Domain]
 
   resources do
-    resource(AshDynal.Test.Order)
+    resource(AshDyan.Test.Order)
   end
 
   dynal do
-    analyzable_resource(AshDynal.Test.Order)
+    analyzable_resource(AshDyan.Test.Order)
   end
 end

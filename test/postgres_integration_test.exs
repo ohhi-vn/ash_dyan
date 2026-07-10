@@ -1,4 +1,4 @@
-defmodule AshDynal.PostgresIntegrationTest do
+defmodule AshDyan.PostgresIntegrationTest do
   @moduledoc """
   Optional Postgres integration tests.
 
@@ -8,7 +8,7 @@ defmodule AshDynal.PostgresIntegrationTest do
   """
   use ExUnit.Case, async: false
 
-  alias AshDynal.Test.PostgresOrder
+  alias AshDyan.Test.PostgresOrder
 
   @moduletag :postgres
 
@@ -28,19 +28,19 @@ defmodule AshDynal.PostgresIntegrationTest do
       |> Ash.create()
 
     {:ok, result} =
-      AshDynal.run(%{resource: PostgresOrder, type: :frequency, column: :status})
+      AshDyan.run(%{resource: PostgresOrder, type: :frequency, column: :status})
 
     assert result.type == :frequency
     assert "paid" in result.labels
   end
 
   test "percentile is supported on Postgres" do
-    assert AshDynal.supports?(PostgresOrder, :percentile)
+    assert AshDyan.supports?(PostgresOrder, :percentile)
   end
 
   test "time_bucket uses date_trunc on Postgres" do
     {:ok, result} =
-      AshDynal.run(%{
+      AshDyan.run(%{
         resource: PostgresOrder,
         type: :time_bucket,
         time_field: :inserted_at,

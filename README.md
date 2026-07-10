@@ -1,10 +1,10 @@
-# AshDynal
+# AshDyan
 
 Runtime-driven dynamic analysis for any Ash resource. Turn "give me a chart of X
 grouped by Y, filtered by Z" into a generic, safe, reusable runtime capability —
 instead of writing a bespoke aggregate action per chart.
 
-AshDynal is a **standalone Ash extension** with no dependency on
+AshDyan is a **standalone Ash extension** with no dependency on
 `ash_phoenix_gen_api`. It works on any Ash app, Phoenix or not. It is **not** a
 full BI/reporting engine, not a query builder UI, and not tied to
 Phoenix/Channels. Delivery (HTTP controller, Channel, LiveView, gen_api mfa) is a
@@ -15,7 +15,7 @@ thin adapter on top.
 ```elixir
 def deps do
   [
-    {:ash_dynal, "~> 0.1.0"}
+    {:ash_dyan, "~> 0.1.0"}
   ]
 end
 ```
@@ -33,7 +33,7 @@ Ash policies/authorization apply unchanged. There is no "skip policies" mode.
 ```elixir
 defmodule MyApp.Order do
   use Ash.Resource,
-    extensions: [AshDynal]
+    extensions: [AshDyan]
 
   dynal do
     analyzable_field :status, type: :frequency
@@ -54,7 +54,7 @@ joins are out of scope for v1):
 
 ```elixir
 defmodule MyApp.Shop do
-  use Ash.Domain, extensions: [AshDynal.Domain]
+  use Ash.Domain, extensions: [AshDyan.Domain]
 
   dynal do
     analyzable_resource MyApp.Order
@@ -83,12 +83,14 @@ end
 Run it:
 
 ```elixir
-{:ok, result} = AshDynal.run(spec)
+{:ok, result} = AshDyan.run(spec)
 # with an actor for policy checks:
-{:ok, result} = AshDynal.run(spec, actor: current_user)
+{:ok, result} = AshDyan.run(spec, actor: current_user)
+# with an explicit in-memory dataset (Ash.DataLayer.Simple / tests):
+{:ok, result} = AshDyan.run(spec, data: rows)
 ```
 
-`AshDynal.run/1` (or `run/2` with an `actor`) is the single entry point. It:
+`AshDyan.run/1` (or `run/2` with an `actor`) is the single entry point. It:
 
 1. Validates the spec against the resource's `dynal` DSL config (unknown
    column/function → error naming the offending field, not silently ignored).
@@ -100,7 +102,7 @@ Run it:
 ## Output shape
 
 ```elixir
-%AshDynal.Result{
+%AshDyan.Result{
   type: :time_bucket,
   labels: ["2026-07-01", "2026-07-02", ...],
   series: [
@@ -115,7 +117,7 @@ client-side chart adapter doesn't need per-type branching.
 
 ## How it works
 
-`AshDynal.run/1` is the single entry point. It:
+`AshDyan.run/1` is the single entry point. It:
 
 1. Validates the spec against the resource's `dynal` DSL config (unknown
    column/function → error naming the offending field, not silently ignored).
@@ -128,7 +130,7 @@ client-side chart adapter doesn't need per-type branching.
 ### Why in-memory aggregation?
 
 Ash's `Ash.Query` (3.x) does not expose a generic `group_by` builder, and the
-return shape of grouped aggregates is data-layer dependent. To keep AshDynal
+return shape of grouped aggregates is data-layer dependent. To keep AshDyan
 data-layer agnostic, safe, and predictable, the engine fetches only the columns
 it needs (bounded by `max_limit`, a hard cap that prevents a full-cardinality
 `group_by` from blowing up the DB) and aggregates in memory. This keeps the
@@ -146,26 +148,33 @@ reference for a future Postgres `date_trunc` pushdown.
 | Percentiles           | in-memory percentile computation                  | Any Ash data layer                   |
 
 All four capabilities therefore work on **any** Ash data layer. The capability
-check (`AshDynal.supports?/2`) still surfaces data-layer limits explicitly so
+check (`AshDyan.supports?/2`) still surfaces data-layer limits explicitly so
 callers can discover them before issuing a query — for example, a deployment
 that wants to forbid percentiles on the in-memory `Ash.DataLayer.Simple` layer
-can do so by configuring `AshDynal.DataLayer.Simple` to return `false` for
+can do so by configuring `AshDyan.DataLayer.Simple` to return `false` for
 `:percentile`.
 
 ## Non-functional guarantees
 
 - **Authorization**: runs through the resource's read action; Ash policies apply.
 - **Resource limits**: `max_group_by`, `max_limit`, and a `query_timeout` are
-  enforced.
-- **Errors**: validation errors name the offending field/function.
+  enforced. `query_timeout` is always applied to the underlying read (it
+  defaults to the resource's configured `query_timeout` and can be overridden
+  per call via `run(spec, timeout: ms)`).
+- **Errors**: validation errors name the offending field/function and carry a
+  stable `reason` atom for programmatic matching (see `AshDyan.Error`).
+- **Logging**: `AshDyan.run/2` emits structured `Logger` events — `:debug`
+  when a request starts or is rejected, `:warning` when the analysis type is
+  unsupported by the data layer, and `:error` when the read fails. Filter
+  contents are never logged.
 - **Testability**: the engine is pure `run/1,2` functions testable against Ash
   resources without any web layer.
 
 ## Adapters (reference, not required)
 
-- `AshDynal.Adapters.PhoenixController` — a thin controller action.
-- `AshDynal.Adapters.PhoenixChannel` — a thin channel event handler.
-- `AshDynal.Adapters.GenApiBridge` — an MFA bridge for `ash_phoenix_gen_api`.
+- `AshDyan.Adapters.PhoenixController` — a thin controller action.
+- `AshDyan.Adapters.PhoenixChannel` — a thin channel event handler.
+- `AshDyan.Adapters.GenApiBridge` — an MFA bridge for `ash_phoenix_gen_api`.
 
 ## Milestones
 

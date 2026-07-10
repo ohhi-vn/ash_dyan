@@ -2,6 +2,7 @@ ExUnit.start()
 
 # Compile the in-memory (Simple data layer) support modules.
 Code.require_file("support/order.ex", __DIR__)
+Code.require_file("support/plain_resource.ex", __DIR__)
 Code.require_file("support/shop.ex", __DIR__)
 Code.require_file("support/seed.ex", __DIR__)
 

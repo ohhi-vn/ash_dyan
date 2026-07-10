@@ -1,13 +1,14 @@
-defmodule AshDynal.MixProject do
+defmodule AshDyan.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :ash_dynal,
+      app: :ash_dyan,
       version: "0.1.0",
       elixir: "~> 1.19",
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      docs: docs()
     ]
   end
 
@@ -22,7 +23,7 @@ defmodule AshDynal.MixProject do
   defp deps do
     [
       {:ash, "~> 3.29"},
-      {:ash_postgres, "~> 2.0", optional: true},
+      {:ash_postgres, "~> 2.0", only: [:dev, :test]},
       {:jason, "~> 1.4"},
       {:usage_rules, "~> 1.2", only: [:dev]},
       # Benchmarking
@@ -36,7 +37,34 @@ defmodule AshDynal.MixProject do
       # Code quality
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
-      {:ex_dna, "~> 1.5", only: [:dev, :test], runtime: false}
+      {:ex_dna, "~> 1.5", only: [:dev, :test], runtime: false},
+
+      # Docs
+      {:ex_doc, "~> 0.34", only: :docs, runtime: false}
+    ]
+  end
+
+  # Run "mix docs" (with MIX_ENV=docs) to build the documentation.
+  def docs do
+    [
+      main: "README.md",
+      logo: nil,
+      extras: [
+        "guides/usage.md",
+        "guides/design.md"
+      ],
+      extras_path: "guides",
+      groups_for_extras: [
+        "Guides": ~r/guides\/.*/
+      ],
+      source_url: nil,
+      homepage_url: nil
+    ]
+  end
+
+  defp aliases do
+    [
+      docs: ["docs"]
     ]
   end
 end

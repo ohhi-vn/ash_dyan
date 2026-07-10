@@ -1,8 +1,8 @@
-defmodule AshDynal.Test.Order do
+defmodule AshDyan.Test.Order do
   @moduledoc false
 
   use Ash.Resource,
-    extensions: [AshDynal],
+    extensions: [AshDyan],
     data_layer: Ash.DataLayer.Simple
 
   attributes do

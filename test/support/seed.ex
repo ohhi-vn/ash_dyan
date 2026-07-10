@@ -1,7 +1,7 @@
-defmodule AshDynal.Test.Seed do
+defmodule AshDyan.Test.Seed do
   @moduledoc false
 
-  alias AshDynal.Test.Order
+  alias AshDyan.Test.Order
 
   @doc """
   Build the in-memory dataset for tests as a list of resource structs.

@@ -1,10 +1,10 @@
-defmodule AshDynal.Test.PostgresOrder do
+defmodule AshDyan.Test.PostgresOrder do
   @moduledoc false
 
   use Ash.Resource,
-    extensions: [AshDynal],
+    extensions: [AshDyan],
     data_layer: AshPostgres.DataLayer,
-    domain: AshDynal.Test.Shop
+    domain: AshDyan.Test.Shop
 
   attributes do
     uuid_primary_key(:id)
@@ -40,6 +40,6 @@ defmodule AshDynal.Test.PostgresOrder do
 
   postgres do
     table("dynal_postgres_orders")
-    repo(AshDynal.Test.Repo)
+    repo(AshDyan.Test.Repo)
   end
 end
