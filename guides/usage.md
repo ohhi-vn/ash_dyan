@@ -213,13 +213,49 @@ AshDyan.supports?(MyApp.Order, :percentile)
 # => true on Postgres, false on the in-memory Simple layer (v1)
 ```
 
-## 8. Adapters (reference)
+## 8. Building an adapter
 
-Thin, optional adapters translate external requests into `AshDyan.run/2`:
+AshDyan ships **no** Phoenix/Channel/gen_api modules. The `run/2` contract is
+already adapter-agnostic, so a delivery layer is ~10 lines of glue you own. A
+thin Phoenix controller action looks like:
 
-- `AshDyan.Adapters.PhoenixController.analyze/2` — render JSON from controller params.
-- `AshDyan.Adapters.PhoenixChannel.analyze/3` — reply to a channel event.
-- `AshDyan.Adapters.GenApiBridge.run/2` — MFA bridge for `ash_phoenix_gen_api`.
+```elixir
+defmodule MyAppWeb.AnalysisController do
+  use MyAppWeb, :controller
+
+  def analyze(conn, params) do
+    spec = %{
+      domain: String.to_atom(params["domain"]),
+      resource: String.to_atom(params["resource"]),
+      type: String.to_atom(params["type"]),
+      column: maybe_atom(params["column"]),
+      function: maybe_atom(params["function"]),
+      bucket: maybe_atom(params["bucket"]),
+      time_field: maybe_atom(params["time_field"]),
+      group_by: maybe_atoms(params["group_by"]),
+      percentiles: maybe_ints(params["percentiles"]),
+      filters: params["filters"] || %{},
+      limit: maybe_int(params["limit"])
+    }
+
+    opts = if actor = conn.assigns[:current_user], do: [actor: actor], else: []
+
+    case AshDyan.run(spec, opts) do
+      {:ok, result} ->
+        conn |> put_resp_content_type("application/json") |> send_resp(200, Jason.encode!(result))
+      {:error, %AshDyan.Error{} = error} ->
+        conn |> put_resp_content_type("application/json")
+             |> send_resp(422, Jason.encode!(%{error: error.message, field: error.field, reason: error.reason}))
+      {:error, other} ->
+        conn |> put_resp_content_type("application/json") |> send_resp(500, Jason.encode!(%{error: inspect(other)}))
+    end
+  end
+end
+```
+
+The same shape works for a Phoenix Channel (`handle_in("analyze", payload,
+socket)` → `AshDyan.run(payload, opts)` → `{:reply, ...}`) or an
+`ash_phoenix_gen_api` MFA bridge (`{MyApp.Analysis, :run, [:spec, :opts]}`).
 
 ## 9. Logging
 

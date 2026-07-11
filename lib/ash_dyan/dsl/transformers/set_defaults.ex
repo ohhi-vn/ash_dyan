@@ -9,10 +9,12 @@ defmodule AshDyan.Dsl.Transformers.SetDefaults do
 
   use Spark.Dsl.Transformer
 
+  alias Spark.Dsl.Transformer
+
   def transform(dsl_state) do
     fields =
       dsl_state
-      |> Spark.Dsl.Transformer.get_entities([:dyan])
+      |> Transformer.get_entities([:dyan])
       |> Enum.map(fn field ->
         %{
           name: field.name,
@@ -26,7 +28,7 @@ defmodule AshDyan.Dsl.Transformers.SetDefaults do
         }
       end)
 
-    dsl_state = Spark.Dsl.Transformer.persist(dsl_state, :ash_dyan_fields, fields)
+    dsl_state = Transformer.persist(dsl_state, :ash_dyan_fields, fields)
 
     {:ok, dsl_state}
   end

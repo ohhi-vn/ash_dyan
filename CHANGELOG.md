@@ -22,5 +22,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Capability check API (`AshDyan.supports?/2`) for data-layer limits.
 - Structured errors via `AshDyan.Error` with stable `reason` atoms.
 - Chart adapter (`AshDyan.Charts.to_chartjs/1`).
-- Reference adapters: `AshDyan.Adapters.PhoenixController`, `AshDyan.Adapters.PhoenixChannel`, `AshDyan.Adapters.GenApiBridge`.
 - Documentation guides (`guides/usage.md`, `guides/design.md`).
+
+### Changed
+
+- Removed the shipped Phoenix/Channel/gen_api adapter modules
+  (`AshDyan.Adapters.*`). AshDyan is now fully standalone — no `plug`
+  dependency at compile time. Delivery layers are documented as copy-paste
+  snippets (see README "Building an adapter") rather than versioned APIs.
+- `:sum` now rejects `nil` values before reducing (matching every other
+  aggregate), so a column with a `nil` no longer raises `ArithmeticError`.
+- `AshDyan.Engine.apply_filters/2` documents that filters are parsed internally
+  via `Ash.Filter.parse/2` (not `filter_input`) so the `dyan` whitelist stays
+  the security boundary.
+- `AshDyan.Info.analyzable_field/3` typespec now includes `:histogram`.

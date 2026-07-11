@@ -13,7 +13,7 @@ defmodule AshDyan.DataLayer.Simple do
   @impl true
   def supports?(_resource, capability)
       when capability in [:frequency, :aggregate, :time_bucket, :histogram],
-    do: true
+      do: true
 
   def supports?(_resource, :percentile), do: false
 end

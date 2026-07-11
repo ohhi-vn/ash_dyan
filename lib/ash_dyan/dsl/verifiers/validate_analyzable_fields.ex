@@ -11,14 +11,16 @@ defmodule AshDyan.Dsl.Verifiers.ValidateAnalyzableFields do
 
   use Spark.Dsl.Verifier
 
+  alias Ash.Resource.Info
   alias AshDyan.Dsl.AnalyzableField
+  alias Spark.Dsl.Verifier
 
   def verify(dsl_state) do
-    resource = Spark.Dsl.Verifier.get_persisted(dsl_state, :module)
+    resource = Verifier.get_persisted(dsl_state, :module)
 
     errors =
       dsl_state
-      |> Spark.Dsl.Verifier.get_entities([:dyan])
+      |> Verifier.get_entities([:dyan])
       |> Enum.flat_map(fn field -> validate_field(resource, field) end)
 
     case errors do
@@ -86,6 +88,6 @@ defmodule AshDyan.Dsl.Verifiers.ValidateAnalyzableFields do
   defp attribute_exists?(nil, _name), do: true
 
   defp attribute_exists?(resource, name) do
-    not is_nil(Ash.Resource.Info.attribute(resource, name))
+    not is_nil(Info.attribute(resource, name))
   end
 end

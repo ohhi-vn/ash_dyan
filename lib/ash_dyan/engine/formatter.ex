@@ -19,6 +19,7 @@ defmodule AshDyan.Engine.Formatter do
     (or a single series named after the column when there is no group_by).
   """
 
+  alias AshDyan.Engine.TimeBucket
   alias AshDyan.{Request, Result}
 
   @doc "Format raw records into an `AshDyan.Result`."
@@ -109,7 +110,7 @@ defmodule AshDyan.Engine.Formatter do
     enriched =
       Enum.map(records, fn row ->
         ts = Map.get(row, time_field)
-        Map.put(row, :__dyan_bucket__, AshDyan.Engine.TimeBucket.label(ts, bucket))
+        Map.put(row, :__dyan_bucket__, TimeBucket.label(ts, bucket))
       end)
 
     if group_by == [] do
@@ -220,7 +221,8 @@ defmodule AshDyan.Engine.Formatter do
   # is chart-ready: `labels` are bin ranges ("0.0-10.0"), `data` are counts.
   defp histogram(%{column: column, bins: bins, bin_width: bin_width, group_by: []}, records) do
     values = numeric_values(records, column)
-    {labels, data} = bin_counts(values, bins, bin_width)
+    {min, bin_width, labels} = bin_spec(values, bins, bin_width)
+    data = bin_counts_with(values, min, bin_width, length(labels))
 
     %Result{
       type: :histogram,
@@ -268,7 +270,7 @@ defmodule AshDyan.Engine.Formatter do
   defp bin_spec(values, bins, bin_width) do
     min = Enum.min(values)
     max = Enum.max(values)
-    {bin_width, _bin_count, labels} = compute_bins(min, max, bins, bin_width, nil)
+    {bin_width, _bin_count, labels} = compute_bins(min, max, bins, bin_width)
     {min, bin_width, labels}
   end
 
@@ -282,36 +284,31 @@ defmodule AshDyan.Engine.Formatter do
     end)
   end
 
-    defp bin_counts(value, bins, bin_width, base \\ nil)
-  defp bin_counts([], _bins, _bin_width, _base ) do
-    {[format_bin(0.0, 1.0)], [0]}
-  end
-
-  defp bin_counts(values, bins, bin_width, _base ) do
-    min = Enum.min(values)
-    {_, bin_width, labels} = compute_bins(min, Enum.max(values), bins, bin_width, nil)
-    {labels, bin_counts_with(values, min, bin_width, length(labels))}
-  end
-
-  defp compute_bins(min, max, bins, nil, nil) do
+  defp compute_bins(min, max, bins, nil) do
     bin_count = max(bins || 10, 1)
     span = max - min
     bin_width = if span == 0, do: 1.0, else: span / bin_count
-    labels = Enum.map(0..(bin_count - 1), fn i ->
-      lo = min + i * bin_width
-      hi = lo + bin_width
-      format_bin(lo, hi)
-    end)
+
+    labels =
+      Enum.map(0..(bin_count - 1), fn i ->
+        lo = min + i * bin_width
+        hi = lo + bin_width
+        format_bin(lo, hi)
+      end)
+
     {bin_width, bin_count, labels}
   end
 
-  defp compute_bins(min, max, _bins, bin_width, nil) when is_number(bin_width) do
+  defp compute_bins(min, max, _bins, bin_width) when is_number(bin_width) do
     bin_count = max(ceil((max - min) / bin_width), 1)
-    labels = Enum.map(0..(bin_count - 1), fn i ->
-      lo = min + i * bin_width
-      hi = lo + bin_width
-      format_bin(lo, hi)
-    end)
+
+    labels =
+      Enum.map(0..(bin_count - 1), fn i ->
+        lo = min + i * bin_width
+        hi = lo + bin_width
+        format_bin(lo, hi)
+      end)
+
     {bin_width, bin_count, labels}
   end
 
@@ -328,13 +325,17 @@ defmodule AshDyan.Engine.Formatter do
   defp format_num(n), do: to_string(n)
 
   defp safe_enum([], _fun), do: nil
+
   defp safe_enum(values, fun) do
     nums = Enum.reject(values, &is_nil/1)
     if nums == [], do: nil, else: fun.(nums)
   end
 
   defp apply_agg(:count, values), do: length(values)
-  defp apply_agg(:count_distinct, values), do: values |> Enum.reject(&is_nil/1) |> Enum.uniq() |> length()
+
+  defp apply_agg(:count_distinct, values),
+    do: values |> Enum.reject(&is_nil/1) |> Enum.uniq() |> length()
+
   defp apply_agg(:sum, values), do: aggregate_numbers(values, &Decimal.add/2, 0)
   defp apply_agg(:min, values), do: safe_enum(values, &Enum.min/1)
   defp apply_agg(:max, values), do: safe_enum(values, &Enum.max/1)
@@ -386,7 +387,9 @@ defmodule AshDyan.Engine.Formatter do
         |> Enum.reduce(Decimal.new(0), fun)
 
       _ ->
-        Enum.reduce(values, zero, &Kernel.+/2)
+        values
+        |> Enum.reject(&is_nil/1)
+        |> Enum.reduce(zero, &Kernel.+/2)
     end
   end
 
@@ -461,5 +464,5 @@ defmodule AshDyan.Engine.Formatter do
 
   defp group_name([]), do: "all"
   defp group_name([single]), do: to_label(single)
-  defp group_name(list), do: list |> Enum.map(&to_label/1) |> Enum.join("/")
+  defp group_name(list), do: list |> Enum.map_join("/", &to_label/1)
 end

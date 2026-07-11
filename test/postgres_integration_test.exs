@@ -18,9 +18,12 @@ defmodule AshDyan.PostgresIntegrationTest do
 
   test "frequency on Postgres" do
     {:ok, _} =
-      Ash.Changeset.for_create(PostgresOrder, :create,
-        %{status: :paid, region: :EU, total_amount: Decimal.new("100.0"), inserted_at: ~U[2026-07-01 10:00:00Z]}
-      )
+      Ash.Changeset.for_create(PostgresOrder, :create, %{
+        status: :paid,
+        region: :EU,
+        total_amount: Decimal.new("100.0"),
+        inserted_at: ~U[2026-07-01 10:00:00Z]
+      })
       |> Ash.create()
 
     {:ok, result} =

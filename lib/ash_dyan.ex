@@ -92,7 +92,8 @@ defmodule AshDyan do
       bin_width: [
         type: :number,
         required: false,
-        doc: "For `:histogram`, a fixed bin width (auto-computed from the data range when omitted)."
+        doc:
+          "For `:histogram`, a fixed bin width (auto-computed from the data range when omitted)."
       ],
       time_field: [
         type: :atom,

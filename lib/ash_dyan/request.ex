@@ -64,19 +64,19 @@ defmodule AshDyan.Request do
 
   def normalize(%{} = map) do
     request = %__MODULE__{
-      domain: Map.get(map, :domain) || Map.get(map, "domain"),
-      resource: Map.get(map, :resource) || Map.get(map, "resource"),
-      type: normalize_atom(Map.get(map, :type) || Map.get(map, "type")),
-      column: normalize_atom(Map.get(map, :column) || Map.get(map, "column")),
-      function: normalize_atom(Map.get(map, :function) || Map.get(map, "function")),
-      bucket: normalize_atom(Map.get(map, :bucket) || Map.get(map, "bucket")),
-      time_field: normalize_atom(Map.get(map, :time_field) || Map.get(map, "time_field")),
-      group_by: normalize_atoms(Map.get(map, :group_by) || Map.get(map, "group_by") || []),
-      percentiles: Map.get(map, :percentiles) || Map.get(map, "percentiles") || [],
-      bins: Map.get(map, :bins) || Map.get(map, "bins"),
-      bin_width: Map.get(map, :bin_width) || Map.get(map, "bin_width"),
-      filters: normalize_filters(Map.get(map, :filters) || Map.get(map, "filters") || %{}),
-      limit: Map.get(map, :limit) || Map.get(map, "limit")
+      domain: get(map, :domain),
+      resource: get(map, :resource),
+      type: normalize_atom(get(map, :type)),
+      column: normalize_atom(get(map, :column)),
+      function: normalize_atom(get(map, :function)),
+      bucket: normalize_atom(get(map, :bucket)),
+      time_field: normalize_atom(get(map, :time_field)),
+      group_by: normalize_atoms(get(map, :group_by) || []),
+      percentiles: get(map, :percentiles) || [],
+      bins: get(map, :bins),
+      bin_width: get(map, :bin_width),
+      filters: normalize_filters(get(map, :filters) || %{}),
+      limit: get(map, :limit)
     }
 
     {:ok, request}
@@ -87,6 +87,11 @@ defmodule AshDyan.Request do
      AshDyan.Error.exception(
        message: "request must be a map or AshDyan.Request, got #{inspect(other)}"
      )}
+  end
+
+  # Reads a key that may be present as either an atom or a string key.
+  defp get(map, key) do
+    Map.get(map, key) || Map.get(map, to_string(key))
   end
 
   # Accept both atom and string keys/values so requests coming from an HTTP
@@ -139,9 +144,8 @@ defmodule AshDyan.Request do
          :ok <- validate_percentiles(request),
          :ok <- validate_histogram(request),
          :ok <- validate_group_by(request),
-         :ok <- validate_filters(request),
-         :ok <- validate_limit(request) do
-      :ok
+         :ok <- validate_filters(request) do
+      validate_limit(request)
     end
   end
 

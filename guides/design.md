@@ -113,7 +113,7 @@ cannot serve the requested type).
 | `AshDyan.DataLayer.*`        | Per-data-layer capability behaviour.                         |
 | `AshDyan.Dsl.*`             | DSL entity, transformer (persist config), verifiers.         |
 | `AshDyan.Domain` / `Info`    | Optional domain-level resource registry.                       |
-| `AshDyan.Adapters.*`         | Thin Phoenix / Channel / gen_api bridges.                     |
+| Delivery adapters            | Not shipped. Write your own thin glue over `AshDyan.run/2`.    |
 
 ## Performance notes
 

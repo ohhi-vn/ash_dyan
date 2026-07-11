@@ -7,6 +7,7 @@ defmodule AshDyan.Info do
   """
 
   alias AshDyan.Dsl.AnalyzableField
+  alias Spark.Dsl.Extension
 
   @doc """
   Returns the list of `AshDyan.Dsl.AnalyzableField` entities for a resource.
@@ -16,14 +17,18 @@ defmodule AshDyan.Info do
   """
   @spec analyzable_fields(module()) :: [AnalyzableField.t()]
   def analyzable_fields(resource) do
-    case Spark.Dsl.Extension.get_persisted(resource, :ash_dyan_fields) do
-      nil -> Spark.Dsl.Extension.get_entities(resource, [:dyan])
+    case Extension.get_persisted(resource, :ash_dyan_fields) do
+      nil -> Extension.get_entities(resource, [:dyan])
       fields -> Enum.map(fields, &struct(AnalyzableField, &1))
     end
   end
 
   @doc "Returns the `AnalyzableField` for a given name and type, or `nil`."
-  @spec analyzable_field(module(), atom(), :frequency | :aggregate | :time_bucket | :percentile) ::
+  @spec analyzable_field(
+          module(),
+          atom(),
+          :frequency | :aggregate | :time_bucket | :percentile | :histogram
+        ) ::
           AnalyzableField.t() | nil
   def analyzable_field(resource, name, type) do
     Enum.find(analyzable_fields(resource), fn field ->
@@ -34,31 +39,31 @@ defmodule AshDyan.Info do
   @doc "Returns the maximum number of group_by fields allowed."
   @spec max_group_by(module()) :: pos_integer()
   def max_group_by(resource) do
-    Spark.Dsl.Extension.get_opt(resource, [:dyan], :max_group_by, 3)
+    Extension.get_opt(resource, [:dyan], :max_group_by, 3)
   end
 
   @doc "Returns the default row limit."
   @spec default_limit(module()) :: pos_integer()
   def default_limit(resource) do
-    Spark.Dsl.Extension.get_opt(resource, [:dyan], :default_limit, 100)
+    Extension.get_opt(resource, [:dyan], :default_limit, 100)
   end
 
   @doc "Returns the maximum row limit (hard cap)."
   @spec max_limit(module()) :: pos_integer()
   def max_limit(resource) do
-    Spark.Dsl.Extension.get_opt(resource, [:dyan], :max_limit, 1000)
+    Extension.get_opt(resource, [:dyan], :max_limit, 1000)
   end
 
   @doc "Returns the configured per-request query timeout (ms)."
   @spec query_timeout(module()) :: pos_integer()
   def query_timeout(resource) do
-    Spark.Dsl.Extension.get_opt(resource, [:dyan], :query_timeout, 15_000)
+    Extension.get_opt(resource, [:dyan], :query_timeout, 15_000)
   end
 
   @doc "Returns the list of attributes a runtime request may filter on."
   @spec allow_filters_on(module()) :: [atom()]
   def allow_filters_on(resource) do
-    Spark.Dsl.Extension.get_opt(resource, [:dyan], :allow_filters_on, [])
+    Extension.get_opt(resource, [:dyan], :allow_filters_on, [])
   end
 
   @doc "Returns true if the resource declares any analyzable fields at all."

@@ -5,6 +5,10 @@ defmodule AshDyan.Test.Shop do
 
   resources do
     resource(AshDyan.Test.Order)
+
+    if System.get_env("RUN_POSTGRES") == "1" do
+      resource(AshDyan.Test.PostgresOrder)
+    end
   end
 
   dyan do

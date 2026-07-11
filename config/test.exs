@@ -4,7 +4,8 @@ import Config
 config :ash_dyan, :ash_dyan, data_layer: Ash.DataLayer.Simple
 
 # Register the test domain so Ash's config-inclusion validation is satisfied.
-config :ash, ash_domains: [AshDyan.Test.Shop]
+# Ash reads this under the extension's otp_app (`:ash_dyan`), not `:ash`.
+config :ash_dyan, ash_domains: [AshDyan.Test.Shop]
 
 # Postgres test repo — only used by the optional Postgres integration tests,
 # which are excluded by default (they require a running Postgres + migrations).

@@ -10,12 +10,16 @@ defmodule AshDyan.Dsl.Domain.Verifiers.ValidateAnalyzableResources do
 
   use Spark.Dsl.Verifier
 
+  alias Ash.Resource.Info
+  alias Spark.Dsl.Extension
+  alias Spark.Dsl.Verifier
+
   def verify(dsl_state) do
-    _domain = Spark.Dsl.Verifier.get_persisted(dsl_state, :module)
+    _domain = Verifier.get_persisted(dsl_state, :module)
 
     errors =
       dsl_state
-      |> Spark.Dsl.Verifier.get_entities([:dyan])
+      |> Verifier.get_entities([:dyan])
       |> Enum.flat_map(fn %{resource: resource} ->
         validate_resource(resource)
       end)
@@ -28,7 +32,7 @@ defmodule AshDyan.Dsl.Domain.Verifiers.ValidateAnalyzableResources do
 
   defp validate_resource(resource) do
     cond do
-      not Code.ensure_loaded?(resource) or not Ash.Resource.Info.resource?(resource) ->
+      not Code.ensure_loaded?(resource) or not Info.resource?(resource) ->
         ["dyan: analyzable_resource #{inspect(resource)} is not an Ash resource"]
 
       not analyzable?(resource) ->
@@ -46,7 +50,7 @@ defmodule AshDyan.Dsl.Domain.Verifiers.ValidateAnalyzableResources do
   # dependency on the `AshDyan` module (which would create a cycle through
   # this verifier and break Spark's `use` macro expansion).
   defp analyzable?(resource) do
-    case Spark.Dsl.Extension.get_entities(resource, [:dyan]) do
+    case Extension.get_entities(resource, [:dyan]) do
       nil -> false
       [] -> false
       _ -> true

@@ -28,7 +28,12 @@ defmodule AshDyan.Test.Order do
 
   dyan do
     analyzable_field(:status, type: :frequency)
-    analyzable_field(:total_amount, type: :aggregate, functions: [:sum, :avg, :min, :max, :count, :count_distinct, :stddev, :variance, :median])
+
+    analyzable_field(:total_amount,
+      type: :aggregate,
+      functions: [:sum, :avg, :min, :max, :count, :count_distinct, :stddev, :variance, :median]
+    )
+
     analyzable_field(:inserted_at, type: :time_bucket, buckets: [:day, :week, :month])
     analyzable_field(:total_amount, type: :percentile, percentiles: [50, 90, 99])
     analyzable_field(:total_amount, type: :histogram, bins: 5)

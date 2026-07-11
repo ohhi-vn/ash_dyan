@@ -10,6 +10,7 @@ defmodule AshDyan.Test.Plain do
   attributes do
     uuid_primary_key(:id)
     attribute(:status, :atom)
+    attribute(:score, :integer)
   end
 
   actions do

@@ -17,7 +17,10 @@ defmodule AshDyan.Result do
       }
   """
 
+  alias AshDyan.Engine.Formatter
+
   @type series :: %{name: String.t(), data: [term()]}
+
   @type t :: %__MODULE__{
           type: AshDyan.capability(),
           labels: [term()],
@@ -35,6 +38,6 @@ defmodule AshDyan.Result do
   @spec format(AshDyan.Request.t(), [Ash.Resource.Record.t()]) ::
           {:ok, t()} | {:error, term()}
   def format(request, records) do
-    AshDyan.Engine.Formatter.format(request, records)
+    Formatter.format(request, records)
   end
 end

@@ -4,7 +4,7 @@ defmodule AshDyan.MixProject do
   def project do
     [
       app: :ash_dyan,
-      version: "0.1.0",
+      version: "0.2.0",
       elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -33,7 +33,7 @@ defmodule AshDyan.MixProject do
   end
 
   # Specifies which paths to compile per environment.
-  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(:test), do: ["lib"]
   defp elixirc_paths(_), do: ["lib"]
 
   # Run "mix help compile.app" to learn about applications.
@@ -45,7 +45,8 @@ defmodule AshDyan.MixProject do
 
   defp package do
     [
-      description: "Declarative, DSL-driven analytics for Ash resources (frequency, aggregate, time_bucket, percentile, histogram).",
+      description:
+        "Declarative, DSL-driven analytics for Ash resources (frequency, aggregate, time_bucket, percentile, histogram).",
       licenses: ["Apache-2.0"],
       links: %{
         "GitHub" => "https://github.com/ohhi-vn/ash_dyan",
@@ -89,9 +90,6 @@ defmodule AshDyan.MixProject do
         Charts: [
           AshDyan.Charts
         ],
-        Adapters: [
-          AshDyan.Adapters.PhoenixController
-        ],
         "Error Handling": [
           AshDyan.Error
         ]
@@ -106,8 +104,7 @@ defmodule AshDyan.MixProject do
     [
       {:ash, "~> 3.29"},
       {:jason, "~> 1.4"},
-      {:plug, "~> 1.14", optional: true},
-      {:decimal, "~> 3.1", optional: true},
+      {:decimal, "~> 3.1"},
       {:ash_postgres, "~> 2.0", only: [:dev, :test]},
 
       # Dev / docs
@@ -123,7 +120,7 @@ defmodule AshDyan.MixProject do
       # Code quality
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
-       {:ex_dna, "~> 1.5", only: [:dev, :test], runtime: false}
+      {:ex_dna, "~> 1.5", only: [:dev, :test], runtime: false}
     ]
   end
 

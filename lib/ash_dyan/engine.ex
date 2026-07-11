@@ -11,7 +11,7 @@ defmodule AshDyan.Engine do
   data-layer agnostic, safe, and predictable, the engine:
 
   1. selects only the columns it needs (the metric column, the time field, the
-     group_by fields, and the filter fields),
+     group_by fields),
   2. applies the caller's filters and the configured `limit` (a hard cap that
      prevents full-cardinality group-bys from blowing up the DB),
   3. runs the query through the resource's read action — so `Ash.Policy`
@@ -26,7 +26,8 @@ defmodule AshDyan.Engine do
   `AshDyan.supports?/2`.
   """
 
-  alias AshDyan.Request
+  alias Ash.DataLayer
+  alias AshDyan.{DataLayer, Error, Info, Request}
   require Logger
 
   @doc "Build an `Ash.Query` that selects exactly the columns needed for the request."
@@ -36,7 +37,7 @@ defmodule AshDyan.Engine do
     resource = request.resource
     capability = request.type
 
-    if AshDyan.DataLayer.supports?(resource, capability) do
+    if DataLayer.supports?(resource, capability) do
       case primary_read_action(resource) do
         {:ok, action_name} ->
           base_query =
@@ -61,7 +62,7 @@ defmodule AshDyan.Engine do
       end)
 
       {:error,
-       AshDyan.Error.exception(
+       Error.exception(
          field: :type,
          reason: :unsupported_data_layer,
          message:
@@ -79,7 +80,7 @@ defmodule AshDyan.Engine do
 
       nil ->
         {:error,
-         AshDyan.Error.exception(
+         Error.exception(
            field: :resource,
            reason: :no_primary_read_action,
            message: "#{inspect(resource)} has no primary :read action for AshDyan to use"
@@ -116,9 +117,14 @@ defmodule AshDyan.Engine do
   defp apply_filters(query, %{filters: filters}) when filters == %{}, do: query
 
   defp apply_filters(query, %{filters: filters}) do
-    # Request filters are already validated against the `dyan` whitelist
-    # (`allow_filters_on`), so we parse them as internal filters (which does not
-    # require the attributes to be `public?`) and attach them to the query.
+    # Request filters are parsed internally via `Ash.Filter.parse/2` rather than
+    # `Ash.Query.filter_input/2`. This is a deliberate choice: `filter_input`
+    # honors Ash field policies (which require `public?` attributes and actor
+    # context), whereas our `dyan` DSL whitelist (`allow_filters_on`) is the
+    # security boundary that already restricts which fields may be filtered.
+    # Using `filter_input` here would silently change behavior for resources that
+    # declare field policies, so do not "fix" this mismatch by swapping to it
+    # without revisiting the security model.
     #
     # A parse failure here means the request passed our whitelist but Ash still
     # could not build the filter (e.g. a type mismatch). We surface it as a
@@ -130,7 +136,7 @@ defmodule AshDyan.Engine do
 
       {:error, reason} ->
         {:error,
-         AshDyan.Error.exception(
+         Error.exception(
            field: :filters,
            reason: :invalid_value,
            message: "could not parse filters #{inspect(filters)}: #{inspect(reason)}"
@@ -139,7 +145,7 @@ defmodule AshDyan.Engine do
   end
 
   defp apply_limit(query, %{limit: nil} = request) do
-    Ash.Query.limit(query, AshDyan.Info.default_limit(request.resource))
+    Ash.Query.limit(query, Info.default_limit(request.resource))
   end
 
   defp apply_limit(query, %{limit: limit}) do
@@ -149,7 +155,7 @@ defmodule AshDyan.Engine do
   defp apply_timeout(query, request, opts) do
     timeout =
       case Keyword.get(opts, :timeout) do
-        nil -> AshDyan.Info.query_timeout(request.resource)
+        nil -> Info.query_timeout(request.resource)
         timeout -> timeout
       end
 

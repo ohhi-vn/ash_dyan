@@ -12,12 +12,14 @@ defmodule AshDyan.DataLayer do
   callers can discover data-layer limits before issuing a query.
   """
 
+  alias Ash.Resource.Info
+
   @callback supports?(module(), AshDyan.capability()) :: boolean()
 
   @doc "Resolve the data-layer capability module for a resource."
   @spec for_resource(module()) :: module()
   def for_resource(resource) do
-    case Ash.Resource.Info.data_layer(resource) do
+    case Info.data_layer(resource) do
       data_layer when data_layer in [AshPostgres.DataLayer, AshPostgres] ->
         AshDyan.DataLayer.Postgres
 

@@ -10,7 +10,7 @@ AshDyan is a **standalone Ash extension** with no dependency on
 `ash_phoenix_gen_api`. It works on any Ash app, Phoenix or not. It is **not** a
 full BI/reporting engine, not a query builder UI, and not tied to
 Phoenix/Channels. Delivery (HTTP controller, Channel, LiveView, gen_api mfa) is a
-thin adapter on top.
+thin adapter you write yourself — see "Building an adapter" below.
 
 ## Installation
 
@@ -102,7 +102,9 @@ chart = AshDyan.Charts.to_chartjs(result)
 1. Validates the spec against the resource's `dyan` DSL config (unknown
    column/function → error naming the offending field, not silently ignored).
 2. Builds an `Ash.Query` selecting only the needed columns, applying the
-   caller's filters and the configured `limit`.
+   caller's filters (parsed internally via `Ash.Filter.parse/2`, not
+   `filter_input`, so the `dyan` whitelist stays the security boundary) and the
+   configured `limit`.
 3. Runs it through the resource's normal read action — so Ash policies apply.
 4. Aggregates the result in memory into the stable chart shape.
 
@@ -122,19 +124,87 @@ chart = AshDyan.Charts.to_chartjs(result)
 Frequency and histogram outputs use the same `labels`/`series` shape so a
 client-side chart adapter doesn't need per-type branching.
 
-## How it works
+## Building an adapter
 
-`AshDyan.run/1` is the single entry point. It:
+AshDyan ships **no** Phoenix/Channel/gen_api modules — the `run/2` contract
+(`spec -> {:ok, result} | {:error, %AshDyan.Error{}}`) is already
+adapter-agnostic, so a delivery layer is ~10 lines of glue. Copy what you need:
 
-1. Validates the spec against the resource's `dyan` DSL config (unknown
-   column/function → error naming the offending field, not silently ignored).
-2. Builds an `Ash.Query` that selects only the needed columns, applies the
-   caller's filters (via `filter_input`, which honors field policies) and the
-   configured `limit`.
-3. Runs it through the resource's normal read action — so Ash policies apply.
-4. Aggregates the returned rows **in memory** into the stable chart shape.
+```elixir
+# A thin Phoenix controller action
 
-### Why in-memory aggregation?
+defmodule MyAppWeb.AnalysisController do
+  use MyAppWeb, :controller
+
+  def analyze(conn, params) do
+    spec =
+      %{}
+      |> put_atom(params, "domain")
+      |> put_atom(params, "resource")
+      |> put_atom(params, "type")
+      |> put_atom(params, "column")
+      |> put_atom(params, "function")
+      |> put_atom(params, "bucket")
+      |> put_atom(params, "time_field")
+      |> put_list(params, "group_by")
+      |> put_list(params, "percentiles")
+      |> put_map(params, "filters")
+      |> put_int(params, "limit")
+
+    opts = if actor = conn.assigns[:current_user], do: [actor: actor], else: []
+
+    case AshDyan.run(spec, opts) do
+      {:ok, result} ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(200, Jason.encode!(result))
+
+      {:error, %AshDyan.Error{} = error} ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(422, Jason.encode!(%{error: error.message, field: error.field, reason: error.reason}))
+
+      {:error, other} ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(500, Jason.encode!(%{error: inspect(other)}))
+    end
+  end
+
+  defp put_atom(spec, params, key) do
+    case Map.get(params, key) do
+      nil -> spec
+      value -> Map.put(spec, String.to_atom(key), String.to_atom(value))
+    end
+  end
+
+  defp put_list(spec, params, key) do
+    case Map.get(params, key) do
+      nil -> spec
+      value -> Map.put(spec, String.to_atom(key), String.split(value, ",") |> Enum.map(&String.to_atom/1))
+    end
+  end
+
+  defp put_map(spec, params, key) do
+    case Map.get(params, key) do
+      nil -> spec
+      value when is_map(value) -> Map.put(spec, String.to_atom(key), value)
+      _ -> spec
+    end
+  end
+
+  defp put_int(spec, params, key) do
+    case Map.get(params, key) do
+      nil -> spec
+      value -> Map.put(spec, String.to_atom(key), String.to_integer(value))
+    end
+  end
+end
+```
+
+The same shape works for a Phoenix Channel (`handle_in("analyze", payload,
+socket)` → `AshDyan.run(payload, opts)` → `{:reply, ...}`) or an
+`ash_phoenix_gen_api` MFA bridge (`{MyApp.Analysis, :run, [:spec, :opts]}`).
 
 Ash's `Ash.Query` (3.x) does not expose a generic `group_by` builder, and the
 return shape of grouped aggregates is data-layer dependent. To keep AshDyan
@@ -163,8 +233,6 @@ that wants to forbid percentiles on the in-memory `Ash.DataLayer.Simple` layer
 can do so by configuring `AshDyan.DataLayer.Simple` to return `false` for
 `:percentile`.
 
-## Non-functional guarantees
-
 - **Authorization**: runs through the resource's read action; Ash policies apply.
 - **Resource limits**: `max_group_by`, `max_limit`, and a `query_timeout` are
   enforced. `query_timeout` is always applied to the underlying read (it
@@ -179,17 +247,12 @@ can do so by configuring `AshDyan.DataLayer.Simple` to return `false` for
 - **Testability**: the engine is pure `run/1,2` functions testable against Ash
   resources without any web layer.
 
-## Adapters (reference, not required)
-
-- `AshDyan.Adapters.PhoenixController` — a thin controller action.
-- `AshDyan.Adapters.PhoenixChannel` — a thin channel event handler.
-- `AshDyan.Adapters.GenApiBridge` — an MFA bridge for `ash_phoenix_gen_api`.
-
-## Milestones
+## Non-functional guarantees
 
 - **M0** — DSL scaffolding: `dyan` section/entities, `Info` module, verifiers.
 - **M1** — frequency + numeric aggregates, formatter, tests (ETS + Postgres-ready).
 - **M2** — time bucketing with Postgres `date_trunc` and ETS fallback.
 - **M3** — percentiles/histograms with capability-check API.
 - **M4** — hardening: limits, timeouts, structured errors.
-- **M5** — docs & adapters (this file + the adapters above).
+- **M5** — docs & standalone positioning (no shipped adapters; see
+  "Building an adapter").

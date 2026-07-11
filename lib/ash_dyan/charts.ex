@@ -43,6 +43,7 @@ defmodule AshDyan.Charts do
   def recommend(%Result{type: :time_bucket}), do: :line
   def recommend(%Result{type: :percentile}), do: :line
   def recommend(%Result{type: :histogram}), do: :histogram
+
   def recommend(%Result{type: type, series: series}) when type in [:frequency, :aggregate] do
     if length(series) == 1, do: :pie, else: :bar
   end
@@ -56,7 +57,8 @@ defmodule AshDyan.Charts do
   @spec build(Result.t(), chart_type() | nil) :: map()
   def build(%Result{} = result, nil), do: build(result, recommend(result))
 
-  def build(%Result{} = result, chart_type) when chart_type in [:bar, :line, :area, :pie, :donut, :histogram, :scatter] do
+  def build(%Result{} = result, chart_type)
+      when chart_type in [:bar, :line, :area, :pie, :donut, :histogram, :scatter] do
     %{
       type: chart_type,
       labels: result.labels,
@@ -79,7 +81,10 @@ defmodule AshDyan.Charts do
     %{
       "type" => chartjs_type(chart_type),
       "data" => %{"labels" => result.labels, "datasets" => datasets},
-      "options" => %{"responsive" => true, "plugins" => %{"legend" => %{"display" => length(result.series) > 1}}}
+      "options" => %{
+        "responsive" => true,
+        "plugins" => %{"legend" => %{"display" => length(result.series) > 1}}
+      }
     }
   end
 
@@ -157,9 +162,10 @@ defmodule AshDyan.Charts do
     %{
       name: s.name,
       type: "pie",
-      data: Enum.map(Enum.with_index(s.data), fn {v, i} ->
-        %{name: Enum.at(names, i), value: v}
-      end)
+      data:
+        Enum.map(Enum.with_index(s.data), fn {v, i} ->
+          %{name: Enum.at(names, i), value: v}
+        end)
     }
   end
 
@@ -203,8 +209,16 @@ defmodule AshDyan.Charts do
   end
 
   @base_colors [
-    "#4e79a7", "#f28e2b", "#e15759", "#76b7b2", "#59a14f",
-    "#edc948", "#b07aa1", "#ff9da7", "#9c755f", "#bab0ac"
+    "#4e79a7",
+    "#f28e2b",
+    "#e15759",
+    "#76b7b2",
+    "#59a14f",
+    "#edc948",
+    "#b07aa1",
+    "#ff9da7",
+    "#9c755f",
+    "#bab0ac"
   ]
 
   defp color(i, alpha \\ 1.0) do
@@ -216,6 +230,7 @@ defmodule AshDyan.Charts do
 
   defp apply_alpha(hex, alpha) do
     <<r::binary-size(2), g::binary-size(2), b::binary-size(2)>> = String.trim_leading(hex, "#")
+
     "rgba(#{String.to_integer(r, 16)},#{String.to_integer(g, 16)},#{String.to_integer(b, 16)},#{alpha})"
   end
 end
