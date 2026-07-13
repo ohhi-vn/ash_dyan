@@ -17,7 +17,7 @@ defmodule AshDyan.Result do
       }
   """
 
-  alias AshDyan.Engine.Formatter
+  alias AshDyan.{Error, Request}
 
   @type series :: %{name: String.t(), data: [term()]}
 
@@ -37,7 +37,15 @@ defmodule AshDyan.Result do
   """
   @spec format(AshDyan.Request.t(), [Ash.Resource.Record.t()]) ::
           {:ok, t()} | {:error, term()}
-  def format(request, records) do
-    Formatter.format(request, records)
+  def format(%Request{type: type} = request, records) do
+    case AshDyan.Analysis.Registry.fetch(type) do
+      {:ok, module} ->
+        with {:ok, result} <- module.format(request, records) do
+          {:ok, AshDyan.Engine.Formatter.post_process(request, result)}
+        end
+
+      :error ->
+        {:error, Error.exception(message: "unknown analysis type #{inspect(type)}")}
+    end
   end
 end

@@ -13,7 +13,9 @@ defmodule AshDyan.Charts do
   - `:area` — like `:line` but filled (good for cumulative / time series).
   - `:pie` / `:donut` — single-series frequency or aggregate breakdowns.
   - `:histogram` — binned numeric distribution (the `:histogram` result type).
-  - `:scatter` — (x, y) pairs when a result has exactly two series.
+  - `:scatter` — (x, y) pairs when a result has exactly two series; the two
+    series are paired index-by-index into points. For a single or more-than-two
+    series result, each series is rendered as its own (x=nil, y=value) scatter.
 
   ## Recommendation
 
@@ -40,12 +42,11 @@ defmodule AshDyan.Charts do
   - `:histogram` → `:histogram`.
   """
   @spec recommend(Result.t()) :: chart_type()
-  def recommend(%Result{type: :time_bucket}), do: :line
-  def recommend(%Result{type: :percentile}), do: :line
-  def recommend(%Result{type: :histogram}), do: :histogram
-
-  def recommend(%Result{type: type, series: series}) when type in [:frequency, :aggregate] do
-    if length(series) == 1, do: :pie, else: :bar
+  def recommend(%Result{type: type} = result) do
+    case AshDyan.Analysis.Registry.fetch(type) do
+      {:ok, module} -> module.recommend_chart(result)
+      :error -> :bar
+    end
   end
 
   @doc """
@@ -54,17 +55,19 @@ defmodule AshDyan.Charts do
   Returns `%{type: chart_type, labels: [...], series: [...], options: %{}}`. If
   `chart_type` is omitted, `recommend/1` is used.
   """
-  @spec build(Result.t(), chart_type() | nil) :: map()
+  @spec build(Result.t(), chart_type() | nil) :: map() | {:error, AshDyan.Error.t()}
   def build(%Result{} = result, nil), do: build(result, recommend(result))
 
   def build(%Result{} = result, chart_type)
       when chart_type in [:bar, :line, :area, :pie, :donut, :histogram, :scatter] do
-    %{
-      type: chart_type,
-      labels: result.labels,
-      series: result.series,
-      options: %{title: nil}
-    }
+    with :ok <- assert_single_series(result, chart_type) do
+      %{
+        type: chart_type,
+        labels: result.labels,
+        series: result.series,
+        options: %{title: nil}
+      }
+    end
   end
 
   @doc """
@@ -73,19 +76,22 @@ defmodule AshDyan.Charts do
   `chart_type` is optional (defaults to `recommend/1`). The returned map is
   JSON-encodable via `Jason.encode!/1`.
   """
-  @spec to_chartjs(Result.t(), chart_type() | nil) :: map()
+  @spec to_chartjs(Result.t(), chart_type() | nil) :: map() | {:error, AshDyan.Error.t()}
   def to_chartjs(%Result{} = result, chart_type \\ nil) do
     chart_type = chart_type || recommend(result)
-    datasets = chartjs_datasets(result, chart_type)
 
-    %{
-      "type" => chartjs_type(chart_type),
-      "data" => %{"labels" => result.labels, "datasets" => datasets},
-      "options" => %{
-        "responsive" => true,
-        "plugins" => %{"legend" => %{"display" => length(result.series) > 1}}
+    with :ok <- assert_single_series(result, chart_type) do
+      datasets = chartjs_datasets(result, chart_type)
+
+      %{
+        "type" => chartjs_type(chart_type),
+        "data" => %{"labels" => result.labels, "datasets" => datasets},
+        "options" => %{
+          "responsive" => true,
+          "plugins" => %{"legend" => %{"display" => length(result.series) > 1}}
+        }
       }
-    }
+    end
   end
 
   @doc """
@@ -94,25 +100,43 @@ defmodule AshDyan.Charts do
   `chart_type` is optional (defaults to `recommend/1`). The returned map is
   JSON-encodable via `Jason.encode!/1`.
   """
-  @spec to_echarts(Result.t(), chart_type() | nil) :: map()
+  @spec to_echarts(Result.t(), chart_type() | nil) :: map() | {:error, AshDyan.Error.t()}
   def to_echarts(%Result{} = result, chart_type \\ nil) do
     chart_type = chart_type || recommend(result)
 
-    series =
-      Enum.map(result.series, fn s ->
-        echarts_series(chart_type, result.labels, s)
-      end)
+    with :ok <- assert_single_series(result, chart_type) do
+      series =
+        if chart_type == :scatter do
+          echarts_scatter_series(result)
+        else
+          Enum.map(result.series, fn s ->
+            echarts_series(chart_type, result.labels, s)
+          end)
+        end
 
-    %{
-      "tooltip" => %{"trigger" => echarts_tooltip_trigger(chart_type)},
-      "legend" => %{"data" => Enum.map(result.series, & &1.name)},
-      "xAxis" => echarts_x_axis(chart_type, result.labels),
-      "yAxis" => echarts_y_axis(chart_type),
-      "series" => series
-    }
+      %{
+        "tooltip" => %{"trigger" => echarts_tooltip_trigger(chart_type)},
+        "legend" => %{"data" => Enum.map(result.series, & &1.name)},
+        "xAxis" => echarts_x_axis(chart_type, result.labels),
+        "yAxis" => echarts_y_axis(chart_type),
+        "series" => series
+      }
+    end
   end
 
-  # --- Chart.js ---
+  # `:pie`/`:donut` require exactly one series; a multi-series result has no
+  # single slice set to render, so reject it rather than raising a MatchError.
+  defp assert_single_series(%Result{series: series}, chart_type)
+       when chart_type in [:pie, :donut] and length(series) != 1 do
+    {:error,
+     AshDyan.Error.exception(
+       field: :chart_type,
+       reason: :incompatible,
+       message: "#{chart_type} requires exactly one series, got #{length(series)}"
+     )}
+  end
+
+  defp assert_single_series(_result, _chart_type), do: :ok
 
   defp chartjs_type(:area), do: "line"
   defp chartjs_type(:donut), do: "doughnut"
@@ -142,14 +166,31 @@ defmodule AshDyan.Charts do
     end)
   end
 
+  defp chartjs_datasets(%Result{series: [x, y]}, :scatter) do
+    pairs =
+      Enum.zip(x.data, y.data)
+      |> Enum.map(fn {a, b} -> %{x: a, y: b} end)
+
+    [%{label: "#{x.name} vs #{y.name}", data: pairs, backgroundColor: color(0)}]
+  end
+
+  defp chartjs_datasets(%Result{series: series}, :scatter) do
+    Enum.with_index(series)
+    |> Enum.map(fn {s, i} ->
+      %{
+        label: s.name,
+        data: Enum.map(s.data, fn v -> %{x: nil, y: v} end),
+        backgroundColor: color(i)
+      }
+    end)
+  end
+
   defp chartjs_datasets(%Result{series: series}, _chart_type) do
     Enum.with_index(series)
     |> Enum.map(fn {s, i} ->
       %{label: s.name, data: s.data, borderColor: color(i), backgroundColor: color(i)}
     end)
   end
-
-  # --- ECharts ---
 
   defp echarts_series(:pie, labels, s) do
     names =
@@ -174,7 +215,12 @@ defmodule AshDyan.Charts do
   end
 
   defp echarts_series(:area, labels, s) do
-    %{name: s.name, type: "line", areaStyle: %{}, data: Enum.zip(labels, s.data)}
+    %{
+      name: s.name,
+      type: "line",
+      areaStyle: %{},
+      data: Enum.zip_with(labels, s.data, fn l, v -> [l, v] end)
+    }
   end
 
   defp echarts_series(:histogram, _labels, s) do
@@ -182,11 +228,24 @@ defmodule AshDyan.Charts do
   end
 
   defp echarts_series(:scatter, _labels, s) do
-    %{name: s.name, type: "scatter", data: s.data}
+    %{name: s.name, type: "scatter", data: Enum.map(s.data, fn v -> [nil, v] end)}
   end
 
   defp echarts_series(_chart_type, _labels, s) do
     %{name: s.name, type: "bar", data: s.data}
+  end
+
+  # Pair two sibling series into (x, y) points. Falls back to per-series scatter
+  # when the result does not have exactly two series.
+  defp echarts_scatter_series(%Result{series: [x, y]}) do
+    data = Enum.zip_with(x.data, y.data, fn a, b -> [a, b] end)
+    [%{name: "#{x.name} vs #{y.name}", type: "scatter", data: data}]
+  end
+
+  defp echarts_scatter_series(%Result{series: series}) do
+    Enum.map(series, fn s ->
+      %{name: s.name, type: "scatter", data: Enum.map(s.data, fn v -> [nil, v] end)}
+    end)
   end
 
   defp echarts_tooltip_trigger(:pie), do: "item"

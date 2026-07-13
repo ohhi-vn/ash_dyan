@@ -87,12 +87,12 @@ avoiding data-layer-specific query shapes.
 `AshDyan.supports?/2` surfaces data-layer limits explicitly so callers can
 discover them *before* issuing a query:
 
-- `AshDyan.DataLayer.Postgres` — all four capabilities supported.
+- `AshDyan.DataLayer.Postgres` — all five capabilities supported.
 - `AshDyan.DataLayer.Simple` (ETS) — `:frequency`, `:aggregate`,
-  `:time_bucket` supported; `:percentile` rejected (clear error rather than
-  silently wrong results).
+  `:time_bucket`, and `:histogram` supported; `:percentile` rejected (clear error
+  rather than silently wrong results).
 - `AshDyan.DataLayer.Default` — only `:frequency` / `:aggregate`;
-  `:time_bucket` / `:percentile` rejected.
+  `:time_bucket` / `:percentile` / `:histogram` rejected.
 
 The capability check is enforced in `Engine.build_query/2` (a `:warning` is
 logged and an `:unsupported_data_layer` error is returned when the data layer

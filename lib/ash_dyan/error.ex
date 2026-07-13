@@ -13,7 +13,8 @@ defmodule AshDyan.Error do
   - `:reason` — a stable atom for programmatic matching. Common values:
     `:not_a_resource`, `:not_analyzable`, `:unknown_type`, `:not_allowed`,
     `:too_many`, `:too_large`, `:unknown_attribute`, `:bad_type`,
-    `:invalid_value`, `:no_primary_read_action`, `:unsupported_data_layer`.
+    `:invalid_value`, `:no_primary_read_action`, `:unsupported_data_layer`,
+    `:internal_error`, `:not_supported`.
 
   ## Example
 
@@ -34,6 +35,12 @@ defmodule AshDyan.Error do
 
   def exception(message) when is_binary(message), do: %__MODULE__{message: message}
   def exception(%__MODULE__{} = error), do: error
+
+  # An already-raised `Ash.Error.*` (or any other exception struct) was passed
+  # in. Preserve its message instead of treating it as a generic opts map and
+  # collapsing to the generic "invalid AshDyan request".
+  def exception(%{__exception__: true} = error),
+    do: %__MODULE__{message: Exception.message(error)}
 
   def exception(opts) when is_map(opts) or is_list(opts) do
     get = fn key ->

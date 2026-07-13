@@ -3,7 +3,7 @@ defmodule AshDyan.Test.Order do
 
   use Ash.Resource,
     extensions: [AshDyan],
-    domain: AshDyan.Test.Shop,
+    domain: nil,
     data_layer: Ash.DataLayer.Simple
 
   attributes do

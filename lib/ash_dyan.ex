@@ -69,7 +69,16 @@ defmodule AshDyan do
             [:sum, :avg, :min, :max, :count, :count_distinct, :stddev, :variance, :median]}},
         required: false,
         default: [],
-        doc: "For `:aggregate`, which functions are allowed."
+        doc: """
+        For `:aggregate`, which functions are allowed.
+
+        Note: runtime-registered custom aggregates (via `config :ash_dyan,
+        :custom_aggregates`) are global — they are permitted on any `:aggregate`
+        (and `:time_bucket`) field regardless of this per-field list, because the
+        DSL `functions:` schema is a closed, compile-time atom list and cannot
+        name a custom function. Treat the per-field `functions:` list as the
+        whitelist for built-in functions only.
+        """
       ],
       buckets: [
         type: {:list, {:one_of, [:minute, :hour, :day, :week, :month, :quarter, :year]}},
@@ -196,11 +205,37 @@ defmodule AshDyan do
   """
   @spec run(Request.t() | map(), [run_opt()]) :: {:ok, Result.t()} | {:error, term()}
   def run(spec, opts \\ []) do
+    do_run(spec, opts)
+  rescue
+    e ->
+      Logger.error(fn ->
+        "AshDyan.run/2: unexpected error: #{Exception.format(:error, e, __STACKTRACE__)}"
+      end)
+
+      {:error,
+       AshDyan.Error.exception(
+         reason: :internal_error,
+         message: "unexpected error while running analysis"
+       )}
+  end
+
+  defp do_run(spec, opts) do
+    {resource, type} = debug_spec(spec)
+
     Logger.debug(fn ->
-      {resource, type} = debug_spec(spec)
       "AshDyan.run/2: starting analysis type=#{inspect(type)} resource=#{inspect(resource)}"
     end)
 
+    :telemetry.span([:ash_dyan, :run], %{resource: resource, type: type}, fn ->
+      case do_run_inner(spec, opts) do
+        {:ok, result} -> {{:ok, result}, %{status: :ok}}
+        {:error, %AshDyan.Error{} = error} -> {{:error, error}, %{status: :rejected}}
+        {:error, other} -> {{:error, other}, %{status: :error}}
+      end
+    end)
+  end
+
+  defp do_run_inner(spec, opts) do
     with {:ok, request} <- Request.normalize(spec),
          :ok <- Request.validate(request),
          {:ok, query} <- AshDyan.Engine.build_query(request, opts),
@@ -213,7 +248,14 @@ defmodule AshDyan do
         {:error, error}
 
       {:error, other} = error ->
-        Logger.error(fn -> "AshDyan.run/2: query failed: #{inspect(other)}" end)
+        # Log only the error's struct and message — never `inspect(other)`, since
+        # for filter-related failures that can embed the offending (potentially
+        # sensitive) filter value, in tension with our "filter contents are never
+        # logged" guarantee.
+        Logger.error(fn ->
+          "AshDyan.run/2: query failed: #{inspect(other.__struct__)} (#{Exception.message(other)})"
+        end)
+
         error
     end
   end
@@ -252,8 +294,15 @@ defmodule AshDyan do
     AshDyan.DataLayer.supports?(resource, capability)
   end
 
-  @typedoc "Analysis capabilities exposed by AshDyan."
-  @type capability :: :frequency | :aggregate | :time_bucket | :percentile | :histogram
+  @typedoc """
+  Analysis capabilities exposed by AshDyan.
+
+  The built-in set is `:frequency`, `:aggregate`, `:time_bucket`,
+  `:percentile`, and `:histogram`. Additional capabilities can be registered at
+  runtime via `config :ash_dyan, :analysis_types, %{my_type: MyModule}` without
+  forking AshDyan (see `AshDyan.Analysis`).
+  """
+  @type capability :: :frequency | :aggregate | :time_bucket | :percentile | :histogram | atom()
 
   @typedoc "Numeric aggregate functions."
   @type aggregate_function ::

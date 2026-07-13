@@ -26,7 +26,6 @@ defmodule AshDyan.Engine do
   `AshDyan.supports?/2`.
   """
 
-  alias Ash.DataLayer
   alias AshDyan.{DataLayer, Error, Info, Request}
   require Logger
 
@@ -88,30 +87,14 @@ defmodule AshDyan.Engine do
     end
   end
 
-  defp apply_select(query, %{type: :frequency, column: column, group_by: group_by}) do
-    Ash.Query.select(query, Enum.uniq([column | group_by]))
-  end
+  defp apply_select(query, %{type: type} = request) do
+    case AshDyan.Analysis.Registry.fetch(type) do
+      {:ok, module} ->
+        Ash.Query.select(query, module.select_fields(request))
 
-  defp apply_select(query, %{type: :aggregate, column: column, group_by: group_by}) do
-    Ash.Query.select(query, Enum.uniq([column | group_by]))
-  end
-
-  defp apply_select(query, %{
-         type: :time_bucket,
-         column: column,
-         time_field: time_field,
-         group_by: group_by
-       }) do
-    time_field = time_field || column
-    Ash.Query.select(query, Enum.uniq([time_field, column | group_by]))
-  end
-
-  defp apply_select(query, %{type: :percentile, column: column, group_by: group_by}) do
-    Ash.Query.select(query, Enum.uniq([column | group_by]))
-  end
-
-  defp apply_select(query, %{type: :histogram, column: column, group_by: group_by}) do
-    Ash.Query.select(query, Enum.uniq([column | group_by]))
+      :error ->
+        query
+    end
   end
 
   defp apply_filters(query, %{filters: filters}) when filters == %{}, do: query

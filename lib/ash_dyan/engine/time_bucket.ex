@@ -32,7 +32,7 @@ defmodule AshDyan.Engine.TimeBucket do
   """
   @spec label(DateTime.t() | NaiveDateTime.t() | Date.t() | nil, AshDyan.time_bucket()) ::
           String.t() | nil
-  def label(nil, _bucket), do: nil
+  def label(nil, _bucket), do: "nil"
 
   # Hour/minute buckets need time-of-day, so route DateTime through
   # NaiveDateTime rather than collapsing straight to Date.

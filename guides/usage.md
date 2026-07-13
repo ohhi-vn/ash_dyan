@@ -201,8 +201,8 @@ end
 Common reasons: `:not_a_resource`, `:not_analyzable`, `:unknown_type`,
 `:not_analyzable` (column/time_field), `:not_allowed` (function/bucket/
 percentiles/filters), `:too_many`, `:too_large`, `:unknown_attribute`,
-`:bad_type`, `:invalid_value`, `:unsupported_data_layer`,
-`:no_primary_read_action`.
+`:bad_type`, `:bad_bins`, `:invalid_value`, `:unsupported_data_layer`,
+`:no_primary_read_action`, `:not_supported`, `:incompatible`.
 
 ## 7. Capability checks
 
@@ -269,7 +269,7 @@ Filter contents are never logged.
 
 ## 10. Analysis types supported
 
-AshDyan exposes four analysis capabilities. Each must be whitelisted per field
+AshDyan exposes five analysis capabilities. Each must be whitelisted per field
 in the resource's `dyan` section (see §1) and is gated by the resource's data
 layer (see §7).
 
@@ -279,6 +279,7 @@ layer (see §7).
 | `:aggregate`   | Numeric aggregate of a column (`sum`/`avg`/`min`/`max`).      | `column`, `function`                             | optional   |
 | `:time_bucket` | Time-bucketed aggregate of a column over a time field.        | `time_field` (or `column`), `bucket`, `function` | optional   |
 | `:percentile`  | In-memory percentile(s) of a numeric column.                  | `column`, `percentiles`                          | optional   |
+| `:histogram`   | Numeric distribution of a column into bins.                   | `column`, `bins` (optional), `bin_width` (optional) | optional   |
 
 - **`:frequency`** — `labels` are the distinct column values; one series named
   after the column (or one series per `group_by` combination).
@@ -292,6 +293,10 @@ layer (see §7).
   per `group_by` combination (or a single series named after the column).
   Computed with linear interpolation between the two nearest ranks, for both
   `Decimal` and plain-number values.
+- **`:histogram`** — `labels` are bin ranges (`"0.0-50.0"`, ...); series per
+  `group_by` combination (or a single series named after the column). Counts are
+  aligned to the shared bin axis so a chart adapter needs no per-type branching.
+  Bins are computed from `bins`/`bin_width` (or auto-sized from the data range).
 
 ### Data-layer capability matrix
 

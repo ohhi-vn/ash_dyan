@@ -21,11 +21,32 @@ defmodule AshDyan.Request do
         bins: 10,                     # optional for :histogram (default 10)
         bin_width: nil,               # optional for :histogram (auto-computed if nil)
         filters: %{status: "paid", region: ["EU", "US"]},
-        limit: 200
+        limit: 200,
+        # Presentation options (apply to every type):
+        sort_by: :value,              # :value | :label
+        sort_order: :desc,            # :asc | :desc
+        top: nil,                     # keep the N largest slices, roll the rest into "Other"
+        cumulative: false,            # running totals (time_bucket)
+        normalize: nil                # :percentage to convert series to share-of-total
       }
+
+  ## Filters
+
+  `filters` are parsed by `Ash.Filter.parse/2`, so they support the full range
+  of operators Ash understands on whitelisted fields — not just equality. For
+  example:
+
+      %{status: "paid"}                       # equality
+      %{region: ["EU", "US"]}                 # membership (in)
+      %{total_amount: %{gt: 100}}             # comparison
+      %{inserted_at: %{between: [start, end]}} # range
+
+  Only fields declared in `allow_filters_on` may be filtered.
   """
 
   @type analysis_type :: :frequency | :aggregate | :time_bucket | :percentile | :histogram
+  @type sort_by :: :value | :label
+  @type sort_order :: :asc | :desc
   @type t :: %__MODULE__{
           domain: module() | nil,
           resource: module(),
@@ -39,7 +60,12 @@ defmodule AshDyan.Request do
           bins: pos_integer() | nil,
           bin_width: number() | nil,
           filters: map(),
-          limit: pos_integer() | nil
+          limit: pos_integer() | nil,
+          sort_by: sort_by() | nil,
+          sort_order: sort_order(),
+          top: pos_integer() | nil,
+          cumulative: boolean(),
+          normalize: :percentage | nil
         }
 
   defstruct [
@@ -51,11 +77,16 @@ defmodule AshDyan.Request do
     :bucket,
     :time_field,
     :limit,
+    :sort_by,
+    :sort_order,
+    :top,
+    :normalize,
     group_by: [],
     percentiles: [],
     bins: nil,
     bin_width: nil,
-    filters: %{}
+    filters: %{},
+    cumulative: false
   ]
 
   @doc "Normalize a request map into a `t/0` struct with defaults applied."
@@ -76,8 +107,20 @@ defmodule AshDyan.Request do
       bins: get(map, :bins),
       bin_width: get(map, :bin_width),
       filters: normalize_filters(get(map, :filters) || %{}),
-      limit: get(map, :limit)
+      limit: get(map, :limit),
+      sort_by: normalize_atom(get(map, :sort_by)),
+      sort_order: normalize_atom(get(map, :sort_order)) || :desc,
+      top: get(map, :top),
+      cumulative: get(map, :cumulative) || false,
+      normalize: normalize_atom(get(map, :normalize))
     }
+
+    # For `:time_bucket`, the DSL may declare a `time_field` that differs from
+    # the field `name` (e.g. `analyzable_field :total_amount, type: :time_bucket,
+    # time_field: :inserted_at`). When the request does not supply an explicit
+    # `:time_field`, resolve it from the declared field so the engine selects
+    # the real attribute rather than a nonexistent one.
+    request = resolve_time_field(request)
 
     {:ok, request}
   end
@@ -89,6 +132,26 @@ defmodule AshDyan.Request do
      )}
   end
 
+  # For `:time_bucket`, the DSL may declare a `time_field` that differs from
+  # the field `name` (e.g. `analyzable_field :total_amount, type: :time_bucket,
+  # time_field: :inserted_at`). When the request does not supply an explicit
+  # `:time_field`, resolve it from the declared field so the engine selects
+  # the real attribute rather than a nonexistent one.
+  defp resolve_time_field(
+         %__MODULE__{type: :time_bucket, time_field: nil, column: column, resource: resource} =
+           request
+       ) do
+    case AshDyan.Info.analyzable_field(resource, column, :time_bucket) do
+      %{time_field: time_field} when not is_nil(time_field) ->
+        %{request | time_field: time_field}
+
+      _ ->
+        request
+    end
+  end
+
+  defp resolve_time_field(request), do: request
+
   # Reads a key that may be present as either an atom or a string key.
   defp get(map, key) do
     Map.get(map, key) || Map.get(map, to_string(key))
@@ -98,7 +161,18 @@ defmodule AshDyan.Request do
   # adapter (which carry string keys) work without manual coercion.
   defp normalize_atom(nil), do: nil
   defp normalize_atom(value) when is_atom(value), do: value
-  defp normalize_atom(value) when is_binary(value), do: String.to_existing_atom(value)
+
+  defp normalize_atom(value) when is_binary(value) do
+    # Only atoms already loaded in the VM can be referenced. Every
+    # legitimately-whitelisted atom already exists (it is declared in the
+    # resource's `dyan` DSL), so a failure here means genuinely bogus input.
+    # Return the raw string so downstream whitelist lookups simply don't match,
+    # yielding a clean `:not_analyzable`/`:not_allowed` error instead of a crash.
+    String.to_existing_atom(value)
+  rescue
+    ArgumentError -> value
+  end
+
   defp normalize_atom(value), do: value
 
   defp normalize_atoms(list) when is_list(list) do
@@ -137,15 +211,131 @@ defmodule AshDyan.Request do
   @spec validate(t()) :: :ok | {:error, AshDyan.Error.t()}
   def validate(%__MODULE__{} = request) do
     with :ok <- validate_resource_present(request),
-         :ok <- validate_type(request),
-         :ok <- validate_column(request),
-         :ok <- validate_function(request),
-         :ok <- validate_bucket(request),
-         :ok <- validate_percentiles(request),
-         :ok <- validate_histogram(request),
+         :ok <- validate_type_specific(request),
+         :ok <- validate_common(request),
          :ok <- validate_group_by(request),
          :ok <- validate_filters(request) do
       validate_limit(request)
+    end
+  end
+
+  # Dispatch to the analysis module registered for the request's `:type`. This
+  # keeps the per-type whitelist checks (column/function/bucket/percentiles/
+  # bins) in one place per type and makes the set of analysis types open.
+  # An unregistered `:type` is reported as `:unknown_type`.
+  defp validate_type_specific(%{type: type} = request) do
+    case AshDyan.Analysis.Registry.fetch(type) do
+      {:ok, module} ->
+        module.validate(request)
+
+      :error ->
+        {:error,
+         AshDyan.Error.exception(
+           field: :type,
+           reason: :unknown_type,
+           message:
+             "type must be one of #{inspect(AshDyan.Analysis.Registry.types())}, got #{inspect(type)}"
+         )}
+    end
+  end
+
+  # Validates the cross-cutting presentation options (sorting, top-N, cumulative,
+  # percentage normalization). These apply to every analysis type, but each type
+  # may reject options that would corrupt its axis semantics (e.g. sorting a
+  # time series out of chronological order).
+  defp validate_common(%{type: type} = request) do
+    with :ok <- validate_presentation_values(request),
+         :ok <- validate_presentation_supported(type, request) do
+      :ok
+    end
+  end
+
+  defp validate_presentation_values(%{
+         sort_by: sort_by,
+         sort_order: sort_order,
+         normalize: normalize,
+         top: top
+       }) do
+    cond do
+      sort_by not in [nil, :value, :label] ->
+        {:error,
+         AshDyan.Error.exception(
+           field: :sort_by,
+           reason: :bad_type,
+           message: ":sort_by must be :value or :label, got #{inspect(sort_by)}"
+         )}
+
+      sort_order not in [:asc, :desc] ->
+        {:error,
+         AshDyan.Error.exception(
+           field: :sort_order,
+           reason: :bad_type,
+           message: ":sort_order must be :asc or :desc, got #{inspect(sort_order)}"
+         )}
+
+      normalize not in [nil, :percentage] ->
+        {:error,
+         AshDyan.Error.exception(
+           field: :normalize,
+           reason: :bad_type,
+           message: ":normalize must be :percentage or nil, got #{inspect(normalize)}"
+         )}
+
+      not is_nil(top) and not (is_integer(top) and top > 0) ->
+        {:error,
+         AshDyan.Error.exception(
+           field: :top,
+           reason: :bad_type,
+           message: ":top must be a positive integer, got #{inspect(top)}"
+         )}
+
+      true ->
+        :ok
+    end
+  end
+
+  # Reject presentation options the analysis type explicitly does not support.
+  defp validate_presentation_supported(type, %{
+         sort_by: sort_by,
+         top: top,
+         cumulative: cumulative,
+         normalize: normalize
+       }) do
+    active =
+      []
+      |> then(fn acc -> if sort_by, do: [:sort_by | acc], else: acc end)
+      |> then(fn acc -> if top, do: [:top | acc], else: acc end)
+      |> then(fn acc -> if cumulative, do: [:cumulative | acc], else: acc end)
+      |> then(fn acc -> if normalize, do: [:normalize | acc], else: acc end)
+
+    case AshDyan.Analysis.Registry.fetch(type) do
+      {:ok, module} ->
+        # Third-party analysis modules may not implement `supports_presentation?/1`;
+        # treat an unimplemented callback as "supports everything" so they keep
+        # working without changes.
+        supports? =
+          if function_exported?(module, :supports_presentation?, 1) do
+            &module.supports_presentation?/1
+          else
+            fn _ -> true end
+          end
+
+        unsupported = Enum.reject(active, supports?)
+
+        if unsupported == [] do
+          :ok
+        else
+          {:error,
+           AshDyan.Error.exception(
+             field: hd(unsupported),
+             reason: :not_supported,
+             message:
+               "presentation option #{inspect(hd(unsupported))} is not supported for analysis type :#{type}"
+           )}
+        end
+
+      :error ->
+        :ok
     end
   end
 
@@ -174,197 +364,6 @@ defmodule AshDyan.Request do
        )}
     end
   end
-
-  defp validate_type(%{type: type})
-       when type in [:frequency, :aggregate, :time_bucket, :percentile, :histogram],
-       do: :ok
-
-  defp validate_type(%{type: type}) do
-    {:error,
-     AshDyan.Error.exception(
-       field: :type,
-       reason: :unknown_type,
-       message:
-         "type must be one of :frequency, :aggregate, :time_bucket, :percentile, :histogram, got #{inspect(type)}"
-     )}
-  end
-
-  defp validate_column(%{type: :frequency, column: nil}) do
-    {:error, AshDyan.Error.exception(field: :column, message: ":frequency requires a :column")}
-  end
-
-  defp validate_column(%{type: :frequency, column: column, resource: resource}) do
-    if AshDyan.Info.analyzable_field(resource, column, :frequency) do
-      :ok
-    else
-      {:error,
-       AshDyan.Error.exception(
-         field: :column,
-         reason: :not_analyzable,
-         message: "column :#{column} is not declared as analyzable for type :frequency"
-       )}
-    end
-  end
-
-  defp validate_column(%{type: type, column: column, resource: resource})
-       when type in [:aggregate, :percentile] do
-    if column do
-      field = AshDyan.Info.analyzable_field(resource, column, type)
-
-      if field do
-        :ok
-      else
-        {:error,
-         AshDyan.Error.exception(
-           field: :column,
-           reason: :not_analyzable,
-           message: "column :#{column} is not declared as analyzable for type #{type}"
-         )}
-      end
-    else
-      {:error, AshDyan.Error.exception(field: :column, message: "#{type} requires a :column")}
-    end
-  end
-
-  defp validate_column(%{type: :time_bucket, column: nil, time_field: nil}) do
-    {:error,
-     AshDyan.Error.exception(
-       field: :time_field,
-       message: ":time_bucket requires a :time_field (or a :column used as the time field)"
-     )}
-  end
-
-  defp validate_column(%{type: :time_bucket} = request) do
-    time_field = request.time_field || request.column
-
-    field = AshDyan.Info.analyzable_field(request.resource, time_field, :time_bucket)
-
-    if field do
-      :ok
-    else
-      {:error,
-       AshDyan.Error.exception(
-         field: :time_field,
-         reason: :not_analyzable,
-         message: "time field :#{time_field} is not declared as analyzable for type :time_bucket"
-       )}
-    end
-  end
-
-  defp validate_column(%{type: :histogram, column: nil}) do
-    {:error, AshDyan.Error.exception(field: :column, message: ":histogram requires a :column")}
-  end
-
-  defp validate_column(%{type: :histogram, column: column, resource: resource}) do
-    if AshDyan.Info.analyzable_field(resource, column, :histogram) do
-      :ok
-    else
-      {:error,
-       AshDyan.Error.exception(
-         field: :column,
-         reason: :not_analyzable,
-         message: "column :#{column} is not declared as analyzable for type :histogram"
-       )}
-    end
-  end
-
-  defp validate_column(_request), do: :ok
-
-  defp validate_function(%{type: type, column: _column, function: function, resource: _resource})
-       when type in [:aggregate, :percentile] do
-    # `:percentile` does not use a function (it is driven by `:percentiles`),
-    # so only `:aggregate` requires `:function` to be present.
-    if type == :percentile or function do
-      :ok
-    else
-      {:error,
-       AshDyan.Error.exception(
-         field: :function,
-         message: "#{type} requires a :function"
-       )}
-    end
-  end
-
-  defp validate_function(_request), do: :ok
-
-  defp validate_bucket(%{type: :time_bucket, bucket: bucket} = request) do
-    if bucket do
-      time_field = request.time_field || request.column
-      field = AshDyan.Info.analyzable_field(request.resource, time_field, :time_bucket)
-
-      allowed = if field, do: field.buckets, else: []
-
-      if bucket in allowed do
-        :ok
-      else
-        {:error,
-         AshDyan.Error.exception(
-           field: :bucket,
-           reason: :not_allowed,
-           message:
-             "bucket :#{bucket} is not allowed for :time_bucket on :#{time_field}; allowed: #{inspect(allowed)}"
-         )}
-      end
-    else
-      {:error,
-       AshDyan.Error.exception(field: :bucket, message: ":time_bucket requires a :bucket")}
-    end
-  end
-
-  defp validate_bucket(_request), do: :ok
-
-  defp validate_percentiles(%{type: :percentile, percentiles: []}) do
-    {:error,
-     AshDyan.Error.exception(field: :percentiles, message: ":percentile requires :percentiles")}
-  end
-
-  defp validate_percentiles(
-         %{type: :percentile, column: column, percentiles: percentiles} = request
-       ) do
-    field = AshDyan.Info.analyzable_field(request.resource, column, :percentile)
-    allowed = if field, do: field.percentiles, else: []
-
-    invalid = Enum.reject(percentiles, &(&1 in allowed))
-
-    if invalid == [] do
-      :ok
-    else
-      {:error,
-       AshDyan.Error.exception(
-         field: :percentiles,
-         reason: :not_allowed,
-         message:
-           "percentiles #{inspect(invalid)} are not allowed for :percentile on :#{column}; allowed: #{inspect(allowed)}"
-       )}
-    end
-  end
-
-  defp validate_percentiles(_request), do: :ok
-
-  defp validate_histogram(%{type: :histogram, bins: bins, bin_width: bin_width}) do
-    cond do
-      not is_nil(bins) and not (is_integer(bins) and bins > 0) ->
-        {:error,
-         AshDyan.Error.exception(
-           field: :bins,
-           reason: :bad_bins,
-           message: ":bins must be a positive integer, got #{inspect(bins)}"
-         )}
-
-      not is_nil(bin_width) and not (is_number(bin_width) and bin_width > 0) ->
-        {:error,
-         AshDyan.Error.exception(
-           field: :bin_width,
-           reason: :bad_bins,
-           message: ":bin_width must be a positive number, got #{inspect(bin_width)}"
-         )}
-
-      true ->
-        :ok
-    end
-  end
-
-  defp validate_histogram(_request), do: :ok
 
   defp validate_group_by(%{resource: resource, group_by: group_by}) do
     max = AshDyan.Info.max_group_by(resource)

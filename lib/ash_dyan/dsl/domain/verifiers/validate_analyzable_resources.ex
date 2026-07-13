@@ -49,11 +49,24 @@ defmodule AshDyan.Dsl.Domain.Verifiers.ValidateAnalyzableResources do
   # Check analyzability directly via the DSL state to avoid a compile-time
   # dependency on the `AshDyan` module (which would create a cycle through
   # this verifier and break Spark's `use` macro expansion).
+  #
+  # During parallel compilation the referenced resource may not have been
+  # compiled (and its `dyan` DSL persisted) yet. We detect that specific case
+  # via the absence of the persisted DSL function and defer the check rather
+  # than raising a false "not analyzable" error. Ash's own `resources do`
+  # registration in the domain already guarantees the module exists and is an
+  # Ash resource, so any other failure here is a genuine configuration problem
+  # that should surface rather than be silently treated as valid.
   defp analyzable?(resource) do
-    case Extension.get_entities(resource, [:dyan]) do
-      nil -> false
-      [] -> false
-      _ -> true
+    if function_exported?(resource, :__spark_dsl__, 0) do
+      case Extension.get_entities(resource, [:dyan]) do
+        nil -> false
+        [] -> false
+        _ -> true
+      end
+    else
+      # DSL not persisted yet (parallel compilation ordering): defer.
+      true
     end
   end
 end
